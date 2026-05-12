@@ -31,6 +31,7 @@ class Database:
         with self.engine.begin() as conn:
             conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
             conn.execute(text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
         Base.metadata.create_all(self.engine)
         logger.info("PostgreSQL schema is ready")
 
@@ -45,4 +46,3 @@ class Database:
             raise
         finally:
             session.close()
-

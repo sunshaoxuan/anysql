@@ -35,6 +35,7 @@ def run_migrations_online() -> None:
     with connectable.connect() as connection:
         connection.exec_driver_sql("CREATE EXTENSION IF NOT EXISTS vector")
         connection.exec_driver_sql("CREATE EXTENSION IF NOT EXISTS pgcrypto")
+        connection.exec_driver_sql("CREATE EXTENSION IF NOT EXISTS pg_trgm")
         context.configure(connection=connection, target_metadata=target_metadata)
         with context.begin_transaction():
             context.run_migrations()

@@ -184,23 +184,38 @@ class PGVectorRepository:
         if not terms:
             return []
         conditions = []
-        params: dict[str, object] = {"product_id": product_id, "limit": top_k}
+        fuzzy_scores = []
+        params: dict[str, object] = {"product_id": product_id, "limit": top_k, "query": query}
         for idx, term in enumerate(terms[:12]):
             key = f"term_{idx}"
             params[key] = f"%{term}%"
+            raw_key = f"raw_{idx}"
+            params[raw_key] = term
             conditions.append(
                 f"(mt.table_name ILIKE :{key} OR mt.comment ILIKE :{key} "
-                f"OR mc.column_name ILIKE :{key} OR mc.comment ILIKE :{key})"
+                f"OR mc.column_name ILIKE :{key} OR mc.comment ILIKE :{key} "
+                f"OR similarity(mt.table_name, :{raw_key}) > 0.18 "
+                f"OR similarity(COALESCE(mt.comment, ''), :{raw_key}) > 0.18 "
+                f"OR similarity(mc.column_name, :{raw_key}) > 0.18 "
+                f"OR similarity(COALESCE(mc.comment, ''), :{raw_key}) > 0.18)"
             )
+            fuzzy_scores.append(
+                f"GREATEST(similarity(mt.table_name, :{raw_key}), "
+                f"similarity(COALESCE(mt.comment, ''), :{raw_key}), "
+                f"similarity(mc.column_name, :{raw_key}), "
+                f"similarity(COALESCE(mc.comment, ''), :{raw_key}))"
+            )
+        fuzzy_score_sql = f"GREATEST({', '.join(fuzzy_scores)})" if fuzzy_scores else "0"
         rows = self.session.execute(text(f"""
             SELECT mt.id, mt.table_name, mt.comment,
                    COUNT(*) AS hit_count,
+                   MAX({fuzzy_score_sql}) AS fuzzy_score,
                    STRING_AGG(DISTINCT mc.column_name || ':' || COALESCE(mc.comment, ''), E'\n') AS matched_columns
             FROM metadata_tables mt
             LEFT JOIN metadata_columns mc ON mc.metadata_table_id = mt.id
             WHERE mt.product_id = :product_id AND ({' OR '.join(conditions)})
             GROUP BY mt.id, mt.table_name, mt.comment
-            ORDER BY hit_count DESC, mt.table_name
+            ORDER BY MAX({fuzzy_score_sql}) DESC, hit_count DESC, mt.table_name
             LIMIT :limit
         """), params).mappings().all()
         results: list[dict] = []
@@ -212,9 +227,9 @@ class PGVectorRepository:
             results.append({
                 "id": row["table_name"],
                 "table": row["table_name"],
-                "score": min(1.0, 0.7 + float(row["hit_count"] or 0) / 20),
+                "score": round(min(1.0, max(float(row["fuzzy_score"] or 0), 0.55 + float(row["hit_count"] or 0) / 40)), 4),
                 "document": document,
-                "source": "text",
+                "source": "fuzzy_text",
             })
         return results
 

@@ -20,6 +20,7 @@ def upgrade() -> None:
     bind = op.get_bind()
     bind.exec_driver_sql("CREATE EXTENSION IF NOT EXISTS vector")
     bind.exec_driver_sql("CREATE EXTENSION IF NOT EXISTS pgcrypto")
+    bind.exec_driver_sql("CREATE EXTENSION IF NOT EXISTS pg_trgm")
     Base.metadata.create_all(bind)
     bind.exec_driver_sql(
         """
