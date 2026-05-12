@@ -6,8 +6,9 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
+from anysql.config import DatabaseConfig, ProductConfig, save_config
 from anysql.logger import logger
-from anysql.models.schemas import ProductInfo
+from anysql.models.schemas import ProductInfo, ProductUpsertRequest
 
 router = APIRouter(prefix="/api/products", tags=["products"])
 
@@ -38,6 +39,15 @@ async def list_products():
             id=pid,
             name=pcfg.name,
             description=pcfg.description,
+            rules=pcfg.rules,
+            sql_dir=pcfg.sql_dir,
+            desc_dir=pcfg.desc_dir,
+            metadata_dir=pcfg.metadata_dir,
+            database_type=pcfg.database.type,
+            database_host=pcfg.database.host,
+            database_port=pcfg.database.port,
+            database_service_name=pcfg.database.service_name,
+            database_username=pcfg.database.username,
             sql_count=sql_count,
             analyzed_count=analyzed,
             db_configured=pcfg.database.is_configured,
@@ -67,10 +77,52 @@ async def get_product(product_id: str):
         id=product_id,
         name=pcfg.name,
         description=pcfg.description,
+        rules=pcfg.rules,
+        sql_dir=pcfg.sql_dir,
+        desc_dir=pcfg.desc_dir,
+        metadata_dir=pcfg.metadata_dir,
+        database_type=pcfg.database.type,
+        database_host=pcfg.database.host,
+        database_port=pcfg.database.port,
+        database_service_name=pcfg.database.service_name,
+        database_username=pcfg.database.username,
         sql_count=len(scan_product_sqls(pcfg.sql_dir, product_id)),
         analyzed_count=len(get_analyzed_ids(pcfg.desc_dir)),
         db_configured=pcfg.database.is_configured,
     )
+
+
+@router.post("", response_model=ProductInfo)
+async def upsert_product(req: ProductUpsertRequest):
+    """新增或更新产品配置"""
+    state = _get_app_state()
+    config = state["config"]
+    existing = config.products.get(req.id)
+    password = req.database_password
+    if not password and existing:
+        password = existing.database.password
+    config.products[req.id] = ProductConfig(
+        name=req.name,
+        description=req.description,
+        rules=req.rules,
+        sql_dir=req.sql_dir,
+        desc_dir=req.desc_dir,
+        metadata_dir=req.metadata_dir,
+        database=DatabaseConfig(
+            type=req.database_type,
+            host=req.database_host,
+            port=req.database_port,
+            service_name=req.database_service_name,
+            username=req.database_username,
+            password=password,
+        ),
+    )
+    for d in [req.sql_dir, req.desc_dir, req.metadata_dir]:
+        from pathlib import Path
+        Path(d).mkdir(parents=True, exist_ok=True)
+    save_config(config)
+    logger.info(f"产品配置已更新: {req.id}")
+    return await get_product(req.id)
 
 
 @router.get("/{product_id}/sqls")

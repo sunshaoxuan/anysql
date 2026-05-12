@@ -216,11 +216,15 @@ class AnalysisPipeline:
         index = collector.load_index() or {}
         table_names = index.get("table_names", [])
         table_hint = ", ".join(table_names[:200]) if isinstance(table_names, list) else ""
+        product_rules = product_cfg.rules.strip() or "No product-specific rules."
 
         prompt = f"""你要为产品 {product_id} 生成一段满足业务需求的 SQL。
 
 业务需求:
 {requirement}
+
+产品规则（必须遵守，优先级高于一般推断）:
+{product_rules}
 
 可用表名候选（只展示前200个，必要时根据相似SQL推断）:
 {table_hint or "No metadata index available."}
@@ -239,6 +243,7 @@ class AnalysisPipeline:
 
     async def _llm_match_candidates(
         self,
+        product_id: str,
         requirement: str,
         candidates: list[SearchResult],
     ) -> list[SQLCandidateMatch]:
@@ -249,10 +254,14 @@ class AnalysisPipeline:
             f"ID: {c.sql_id}\nVector score: {c.score}\nSummary: {c.summary}\nSQL: {c.raw_sql}"
             for c in candidates
         )
+        product_rules = self.config.products[product_id].rules.strip() or "No product-specific rules."
         prompt = f"""请判断候选 SQL 是否满足用户需求，并给每个候选打 0 到 1 的匹配分。
 
 用户需求:
 {requirement}
+
+产品规则（必须用于判断候选是否可用）:
+{product_rules}
 
 候选:
 {candidate_text}
@@ -297,6 +306,7 @@ class AnalysisPipeline:
         requirement: str,
         current_sql: str,
     ) -> SQLRecord:
+        product_rules = self.config.products[product_id].rules.strip() or "No product-specific rules."
         prompt = f"""请根据用户修正意见改写 SQL。
 
 当前 SQL:
@@ -304,6 +314,9 @@ class AnalysisPipeline:
 
 用户修正意见:
 {requirement}
+
+产品规则（必须遵守，优先级高于一般推断）:
+{product_rules}
 
 要求:
 1. 保留原 SQL 的产品命名习惯和表字段风格。
@@ -326,7 +339,7 @@ class AnalysisPipeline:
             return "revised", record, [], True
 
         candidates = await self.vector.search(message, product=product_id, top_k=top_k)
-        matches = await self._llm_match_candidates(message, candidates)
+        matches = await self._llm_match_candidates(product_id, message, candidates)
         best = matches[0] if matches else None
         if best and best.llm_score >= match_threshold:
             from anysql.harness.tasks import load_all_records

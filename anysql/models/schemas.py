@@ -205,9 +205,35 @@ class ProductInfo(BaseModel):
     id: str
     name: str
     description: str = ""
+    rules: str = ""
+    sql_dir: str = ""
+    desc_dir: str = ""
+    metadata_dir: str = ""
+    database_type: str = "oracle"
+    database_host: Optional[str] = None
+    database_port: int = 1521
+    database_service_name: Optional[str] = None
+    database_username: Optional[str] = None
     sql_count: int = 0
     analyzed_count: int = 0
     db_configured: bool = False
+
+
+class ProductUpsertRequest(BaseModel):
+    """新增或更新产品配置"""
+    id: str = Field(pattern=r"^[A-Za-z0-9_-]+$")
+    name: str
+    description: str = ""
+    rules: str = ""
+    sql_dir: str
+    desc_dir: str
+    metadata_dir: str
+    database_type: str = "oracle"
+    database_host: Optional[str] = None
+    database_port: int = 1521
+    database_service_name: Optional[str] = None
+    database_username: Optional[str] = None
+    database_password: Optional[str] = None
 
 
 class AnalysisProgress(BaseModel):

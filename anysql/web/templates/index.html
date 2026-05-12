@@ -8,28 +8,29 @@
                 <div>
                     <div class="badge badge-blue">SQL Assistant</div>
                     <h1>AnySQL Intelligence</h1>
-                    <p>SQLに限定した検索・生成・修正ワークベンチ。</p>
+                    <p data-i18n="homeLead">SQLに限定した検索・生成・修正ワークベンチ。</p>
                 </div>
-                <select id="productSelect" class="product-select">
-                    {% for id, product in products.items() %}
-                    <option value="{{ id }}">{{ product.name }}</option>
-                    {% endfor %}
-                </select>
             </div>
 
             <div id="chatLog" class="chat-log">
                 <div class="chat-message assistant">
                     <div class="avatar">AI</div>
                     <div class="bubble">
-                        条件を入力してください。高一致のSQLがあれば再利用し、足りなければMetadataから作成して知識化します。
+                        <span data-i18n="welcome">条件を入力してください。高一致のSQLがあれば再利用し、足りなければMetadataから作成して知識化します。</span>
                     </div>
                 </div>
             </div>
 
             <form id="assistantForm" class="assistant-input">
-                <textarea id="messageInput" rows="4" placeholder="例: 2026年1月以降に異動した職員を所属順に取得したい"></textarea>
-                <button type="submit" class="btn btn-primary">
-                    <i class="fas fa-paper-plane"></i> 送信
+                <label class="input-label" for="productSelect" data-i18n="product">プロダクト</label>
+                <select id="productSelect" class="product-select">
+                    {% for id, product in products.items() %}
+                    <option value="{{ id }}">{{ product.name }}</option>
+                    {% endfor %}
+                </select>
+                <textarea id="messageInput" rows="4" data-i18n-placeholder="placeholder" placeholder="例: 2026年1月以降に異動した職員を所属順に取得したい"></textarea>
+                <button type="submit" class="btn btn-primary icon-btn send-btn" data-i18n-title="send" title="送信">
+                    <i class="fas fa-paper-plane"></i>
                 </button>
             </form>
         </section>
@@ -37,19 +38,19 @@
         <section class="sql-workspace">
             <div class="sql-toolbar">
                 <div>
-                    <div class="side-label">現在のSQL</div>
-                    <div id="currentSqlMeta" class="side-muted">まだSQLは選択されていません。</div>
+                    <div class="side-label" data-i18n="currentSql">現在のSQL</div>
+                    <div id="currentSqlMeta" class="side-muted" data-empty="true">まだSQLは選択されていません。</div>
                 </div>
                 <div class="sql-actions">
                     <label class="comment-toggle">
                         <input type="checkbox" id="includeComments" checked>
-                        <span>注釈を含める</span>
+                        <span data-i18n="includeComments">注釈を含める</span>
                     </label>
-                    <button type="button" class="btn btn-outline" onclick="copyCurrentSql(this)">
-                        <i class="far fa-copy"></i> Copy
+                    <button type="button" class="btn btn-outline icon-btn" onclick="copyCurrentSql(this)" title="Copy">
+                        <i class="far fa-copy"></i>
                     </button>
-                    <button type="button" class="btn btn-outline" onclick="resetCurrentSql()">新規相談</button>
-                    <a id="detailLink" class="btn btn-outline disabled-link" href="#" aria-disabled="true">詳細</a>
+                    <button type="button" class="btn btn-outline icon-btn" onclick="resetCurrentSql()" data-i18n-title="newChat" title="新規相談"><i class="fas fa-plus"></i></button>
+                    <a id="detailLink" class="btn btn-outline icon-btn disabled-link" href="#" aria-disabled="true" data-i18n-title="detail" title="詳細"><i class="fas fa-arrow-up-right-from-square"></i></a>
                 </div>
             </div>
 
@@ -58,7 +59,7 @@
             </div>
 
             <div class="match-panel">
-                <div class="side-label">マッチ判定</div>
+                <div class="side-label" data-i18n="match">マッチ判定</div>
                 <div id="matchList" class="match-list"></div>
             </div>
         </section>
@@ -78,14 +79,6 @@ const SQL_KEYWORDS = new Set([
     'ALTER','DROP','MERGE','CASE','WHEN','THEN','ELSE','END','AS','DISTINCT','BETWEEN','LIKE','IS','NULL',
     'TO_DATE','NVL','COALESCE','COUNT','SUM','MIN','MAX','AVG','OVER','PARTITION'
 ]);
-
-const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, ch => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#39;'
-}[ch]));
 
 function stripSqlComments(sql) {
     return String(sql || '')
@@ -161,7 +154,7 @@ function addMessage(role, html) {
 function copyToClipboard(text, btn) {
     navigator.clipboard.writeText(text).then(() => {
         const original = btn.innerHTML;
-        btn.innerHTML = '<i class="fas fa-check"></i> Copied';
+        btn.innerHTML = '<i class="fas fa-check"></i>';
         setTimeout(() => btn.innerHTML = original, 1600);
     });
 }
@@ -173,7 +166,7 @@ function copyCurrentSql(btn) {
 function renderMatches(matches) {
     const el = document.getElementById('matchList');
     if (!matches || matches.length === 0) {
-        el.innerHTML = '<div class="side-muted">候補なし</div>';
+        el.innerHTML = `<div class="side-muted">${escapeHtml(t('noCandidate'))}</div>`;
         return;
     }
     el.innerHTML = matches.slice(0, 6).map(m => `
@@ -192,7 +185,9 @@ function renderRecord(response) {
     currentSqlId = stmt.id;
     currentSql = stmt.raw_sql || '';
 
-    document.getElementById('currentSqlMeta').innerText = `${response.mode.toUpperCase()} / ${stmt.id || ''}`;
+    const meta = document.getElementById('currentSqlMeta');
+    meta.dataset.empty = 'false';
+    meta.innerText = `${response.mode.toUpperCase()} / ${stmt.id || ''}`;
     const detail = document.getElementById('detailLink');
     detail.href = `/sql/${encodeURIComponent(stmt.id)}`;
     detail.classList.remove('disabled-link');
@@ -216,7 +211,7 @@ function renderRecord(response) {
 async function sendMessage(text) {
     const product = document.getElementById('productSelect').value;
     addMessage('user', escapeHtml(text));
-    addMessage('assistant', '<i class="fas fa-spinner fa-spin"></i> 判定中...');
+    addMessage('assistant', `<i class="fas fa-spinner fa-spin"></i> ${escapeHtml(t('checking'))}`);
 
     const log = document.getElementById('chatLog');
     const pending = log.lastElementChild;
@@ -263,7 +258,9 @@ document.getElementById('includeComments').addEventListener('change', renderSql)
 function resetCurrentSql() {
     currentSqlId = null;
     currentSql = null;
-    document.getElementById('currentSqlMeta').innerText = 'まだSQLは選択されていません。';
+    const meta = document.getElementById('currentSqlMeta');
+    meta.dataset.empty = 'true';
+    meta.innerText = t('noSql');
     document.getElementById('matchList').innerHTML = '';
     const detail = document.getElementById('detailLink');
     detail.href = '#';
@@ -271,5 +268,12 @@ function resetCurrentSql() {
     detail.setAttribute('aria-disabled', 'true');
     renderSql();
 }
+
+window.onAnySqlLanguageChange = () => {
+    const meta = document.getElementById('currentSqlMeta');
+    if (meta && meta.dataset.empty === 'true') meta.innerText = t('noSql');
+    const matchList = document.getElementById('matchList');
+    if (matchList && !matchList.children.length) renderMatches([]);
+};
 </script>
 {% endblock %}

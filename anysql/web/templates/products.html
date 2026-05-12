@@ -2,38 +2,131 @@
 
 {% block content %}
 <div class="app-container">
-    <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 3rem; border-bottom: 1px solid var(--border); padding-bottom: 1.5rem;">
-        <div>
-            <h1 style="font-size: 2rem; font-weight: 700; color: var(--text-main);">プロダクト管理</h1>
-            <p style="color: var(--text-sub); font-size: 0.95rem;">登録されているデータベースと製品の一覧</p>
-        </div>
-        <button class="btn btn-primary" onclick="alert('新機能: プロダクト追加')">
-            <i class="fas fa-plus"></i> 新規追加
-        </button>
-    </div>
+    <div class="products-workbench">
+        <section class="products-list">
+            <div class="products-head">
+                <div>
+                    <h1>Products</h1>
+                    <p>Metadata, SQL sources, and model guardrails.</p>
+                </div>
+                <button class="btn btn-primary icon-btn" onclick="newProduct()" title="New product">
+                    <i class="fas fa-plus"></i>
+                </button>
+            </div>
+            <div id="productCards" class="product-cards"></div>
+        </section>
 
-    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 1.5rem;">
-        {% for id, p in products.items() %}
-        <div class="card" style="display: flex; flex-direction: column; justify-content: space-between;">
-            <div>
-                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1.5rem;">
-                    <div style="width: 48px; height: 48px; background: var(--accent-light); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: var(--accent); font-size: 1.25rem;">
-                        <i class="fas fa-database"></i>
-                    </div>
-                    <span class="badge badge-blue">{{ p.database.type }}</span>
+        <section class="product-editor">
+            <div class="side-label">Product</div>
+            <form id="productForm" class="product-form">
+                <div class="form-grid">
+                    <label>ID<input name="id" required pattern="[A-Za-z0-9_-]+"></label>
+                    <label>Name<input name="name" required></label>
                 </div>
-                <h3 style="font-size: 1.25rem; font-weight: 700; margin-bottom: 0.5rem;">{{ p.name }}</h3>
-                <p style="color: var(--text-sub); font-size: 0.85rem; margin-bottom: 1.5rem;">Host: {{ p.database.host }}</p>
-            </div>
-            
-            <div style="padding-top: 1.5rem; border-top: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center;">
-                <div style="display: flex; gap: 0.5rem;">
-                    <div style="font-size: 0.75rem; color: var(--text-sub);">SQL数: <span style="color: var(--text-main); font-weight: 600;">--</span></div>
+                <label>Description<textarea name="description" rows="2"></textarea></label>
+                <label>Rules / Prompt Guardrails<textarea name="rules" rows="8" placeholder="Undocumented product rules, naming conventions, forbidden joins, date handling, tenant filters..."></textarea></label>
+                <div class="form-grid">
+                    <label>SQL Dir<input name="sql_dir" required></label>
+                    <label>Desc Dir<input name="desc_dir" required></label>
+                    <label>Metadata Dir<input name="metadata_dir" required></label>
+                    <label>DB Type<input name="database_type" value="oracle"></label>
+                    <label>Host<input name="database_host"></label>
+                    <label>Port<input name="database_port" type="number" value="1521"></label>
+                    <label>Service<input name="database_service_name"></label>
+                    <label>User<input name="database_username"></label>
+                    <label>Password<input name="database_password" type="password"></label>
                 </div>
-                <a href="/analysis" class="btn btn-outline" style="font-size: 0.8rem;">分析状況を確認</a>
-            </div>
-        </div>
-        {% endfor %}
+                <div class="editor-actions">
+                    <button type="submit" class="btn btn-primary icon-btn" title="Save"><i class="fas fa-floppy-disk"></i></button>
+                    <button type="button" class="btn btn-outline icon-btn" onclick="newProduct()" title="Clear"><i class="fas fa-eraser"></i></button>
+                </div>
+            </form>
+        </section>
     </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let products = [];
+
+function fillForm(product = {}) {
+    const form = document.getElementById('productForm');
+    const defaults = {
+        id: '',
+        name: '',
+        description: '',
+        rules: '',
+        sql_dir: './products/new/sql',
+        desc_dir: './products/new/desc',
+        metadata_dir: './products/new/metadata',
+        database_type: 'oracle',
+        database_host: '',
+        database_port: 1521,
+        database_service_name: '',
+        database_username: '',
+        database_password: ''
+    };
+    const data = { ...defaults, ...product };
+    for (const [key, value] of Object.entries(data)) {
+        const el = form.elements[key];
+        if (el) el.value = value ?? '';
+    }
+}
+
+function newProduct() {
+    fillForm();
+    document.querySelector('[name="id"]').focus();
+}
+
+function renderProducts() {
+    const list = document.getElementById('productCards');
+    list.innerHTML = products.map(p => `
+        <button class="product-card" onclick="editProduct('${p.id}')">
+            <span><i class="fas fa-database"></i></span>
+            <strong>${escapeHtml(p.name)}</strong>
+            <small>${escapeHtml(p.id)} / ${p.sql_count || 0} SQL</small>
+        </button>
+    `).join('');
+}
+
+function editProduct(id) {
+    const p = products.find(item => item.id === id);
+    if (!p) return;
+    fillForm({
+        ...p,
+        database_type: p.database_type || 'oracle',
+        database_host: p.database_host || '',
+        database_port: p.database_port || 1521,
+        database_service_name: p.database_service_name || '',
+        database_username: p.database_username || ''
+    });
+}
+
+async function loadProducts() {
+    const res = await fetch('/api/products');
+    products = await res.json();
+    renderProducts();
+    if (products[0]) editProduct(products[0].id);
+}
+
+document.getElementById('productForm').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const payload = Object.fromEntries(new FormData(form).entries());
+    payload.database_port = Number(payload.database_port || 1521);
+    const res = await fetch('/api/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+    if (!res.ok) {
+        alert(await res.text());
+        return;
+    }
+    await loadProducts();
+});
+
+loadProducts();
+</script>
 {% endblock %}

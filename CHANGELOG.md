@@ -2,6 +2,20 @@
 
 All notable changes to AnySQL are documented in this file.
 
+## [0.1.5] - 2026-05-12
+
+### Added
+
+- Added basic i18n support for Japanese, Chinese, and English, defaulting to Japanese.
+- Added editable product rules that are always injected into SQL match, generation, and revision prompts.
+- Added product create/edit API and UI for product directories, database settings, and rules.
+
+### Changed
+
+- Moved product selection to the chat input area so users can switch target products while working.
+- Removed login/user display from the UI.
+- Simplified navigation and workbench actions into icon-first controls with hover titles.
+
 ## [0.1.4] - 2026-05-12
 
 ### Changed

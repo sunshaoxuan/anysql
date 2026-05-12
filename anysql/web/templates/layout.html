@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html lang="ja" data-lang="ja">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -15,13 +15,13 @@
             Any<span>SQL</span>
         </a>
         <div style="display: flex; gap: 1.5rem; align-items: center;">
-            <a href="/products" style="text-decoration: none; color: var(--text-sub); font-size: 0.9rem; font-weight: 500;">プロダクト管理</a>
-            <a href="/analysis" style="text-decoration: none; color: var(--text-sub); font-size: 0.9rem; font-weight: 500;">分析ダッシュボード</a>
-            <div style="width: 1px; height: 20px; background: var(--border);"></div>
-            <div style="display: flex; align-items: center; gap: 0.5rem;">
-                <div style="width: 32px; height: 32px; border-radius: 50%; background: var(--accent); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 0.8rem;">JP</div>
-                <span style="font-size: 0.85rem; color: var(--text-main); font-weight: 500;">User_Admin</span>
-            </div>
+            <a href="/products" class="icon-nav" title="プロダクト管理"><i class="fas fa-database"></i></a>
+            <a href="/analysis" class="icon-nav" title="分析ダッシュボード"><i class="fas fa-chart-line"></i></a>
+            <select id="langSelect" class="lang-select" title="Language">
+                <option value="ja">日本語</option>
+                <option value="zh">中文</option>
+                <option value="en">English</option>
+            </select>
         </div>
     </nav>
 
@@ -29,12 +29,109 @@
         {% block content %}{% endblock %}
     </main>
 
-    <footer style="padding: 4rem 0 2rem; text-align: center; color: var(--text-sub); font-size: 0.8rem;">
-        &copy; 2026 AnySQL Intelligence Platform. Built for Excellence.
-    </footer>
-
     <script>
-        // 全局通知/加载逻辑
+        const I18N = {
+            ja: {
+                productManagement: 'プロダクト管理',
+                analysisDashboard: '分析ダッシュボード',
+                sqlAssistant: 'SQL Assistant',
+                homeLead: 'SQLに限定した検索・生成・修正ワークベンチ。',
+                welcome: '条件を入力してください。高一致のSQLがあれば再利用し、足りなければMetadataから作成して知識化します。',
+                product: 'プロダクト',
+                placeholder: '例: 2026年1月以降に異動した職員を所属順に取得したい',
+                send: '送信',
+                currentSql: '現在のSQL',
+                noSql: 'まだSQLは選択されていません。',
+                includeComments: '注釈を含める',
+                newChat: '新規相談',
+                detail: '詳細',
+                match: 'マッチ判定',
+                noCandidate: '候補なし',
+                checking: '判定中...',
+                copied: 'Copied'
+            },
+            zh: {
+                productManagement: '产品管理',
+                analysisDashboard: '分析面板',
+                sqlAssistant: 'SQL 助手',
+                homeLead: '仅面向 SQL 的检索、生成与修正工作台。',
+                welcome: '请输入业务条件。高匹配时复用已有 SQL，不足时基于 Metadata 生成并沉淀为知识。',
+                product: '产品',
+                placeholder: '例：查询 2026 年 1 月以后发生异动的职员，并按所属排序',
+                send: '发送',
+                currentSql: '当前 SQL',
+                noSql: '尚未选择 SQL。',
+                includeComments: '包含注释',
+                newChat: '新会话',
+                detail: '详情',
+                match: '匹配判定',
+                noCandidate: '无候选',
+                checking: '判定中...',
+                copied: '已复制'
+            },
+            en: {
+                productManagement: 'Products',
+                analysisDashboard: 'Analysis',
+                sqlAssistant: 'SQL Assistant',
+                homeLead: 'A SQL-only workbench for matching, generation, and revision.',
+                welcome: 'Describe the business condition. High-confidence matches reuse known SQL; otherwise AnySQL generates and learns a new one.',
+                product: 'Product',
+                placeholder: 'Example: Find employees transferred after January 2026 ordered by department',
+                send: 'Send',
+                currentSql: 'Current SQL',
+                noSql: 'No SQL selected yet.',
+                includeComments: 'Include comments',
+                newChat: 'New chat',
+                detail: 'Detail',
+                match: 'Match scoring',
+                noCandidate: 'No candidates',
+                checking: 'Checking...',
+                copied: 'Copied'
+            }
+        };
+
+        function currentLang() {
+            return localStorage.getItem('anysql.lang') || 'ja';
+        }
+
+        function t(key) {
+            const lang = currentLang();
+            return (I18N[lang] && I18N[lang][key]) || I18N.ja[key] || key;
+        }
+
+        function escapeHtml(value) {
+            return String(value ?? '').replace(/[&<>"']/g, ch => ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#39;'
+            }[ch]));
+        }
+
+        function applyI18n() {
+            const lang = currentLang();
+            document.documentElement.lang = lang;
+            document.documentElement.dataset.lang = lang;
+            const select = document.getElementById('langSelect');
+            if (select) select.value = lang;
+            document.querySelectorAll('[data-i18n]').forEach(el => el.textContent = t(el.dataset.i18n));
+            document.querySelectorAll('[data-i18n-title]').forEach(el => el.title = t(el.dataset.i18nTitle));
+            document.querySelectorAll('[data-i18n-placeholder]').forEach(el => el.placeholder = t(el.dataset.i18nPlaceholder));
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const select = document.getElementById('langSelect');
+            if (select) {
+                select.value = currentLang();
+                select.addEventListener('change', () => {
+                    localStorage.setItem('anysql.lang', select.value);
+                    applyI18n();
+                    if (window.onAnySqlLanguageChange) window.onAnySqlLanguageChange();
+                });
+            }
+            applyI18n();
+        });
     </script>
     {% block scripts %}{% endblock %}
 </body>

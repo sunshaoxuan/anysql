@@ -23,6 +23,9 @@ products:
   demo:
     name: "Demo Product"
     description: "Example product configuration"
+    rules: |
+      Write product-specific SQL rules here.
+      These rules are always injected into SQL matching, generation, and revision prompts.
     sql_dir: "./products/demo/sql"
     desc_dir: "./products/demo/desc"
     metadata_dir: "./products/demo/metadata"

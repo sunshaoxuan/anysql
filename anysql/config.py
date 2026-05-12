@@ -60,6 +60,7 @@ class ProductConfig(BaseModel):
     """产品定义"""
     name: str
     description: str = ""
+    rules: str = ""
     sql_dir: str
     desc_dir: str
     metadata_dir: str
@@ -92,6 +93,7 @@ class AppConfig(BaseModel):
 # ---------------------------------------------------------------------------
 
 _config: Optional[AppConfig] = None
+_config_path: Optional[Path] = None
 
 
 def _find_config_file() -> Path:
@@ -112,7 +114,7 @@ def _find_config_file() -> Path:
 
 def load_config(config_path: Optional[str] = None) -> AppConfig:
     """加载并验证配置文件"""
-    global _config
+    global _config, _config_path
 
     if config_path:
         path = Path(config_path)
@@ -120,6 +122,7 @@ def load_config(config_path: Optional[str] = None) -> AppConfig:
         path = _find_config_file()
 
     logger.info(f"加载配置文件: {path}")
+    _config_path = path
 
     with open(path, "r", encoding="utf-8") as f:
         raw = yaml.safe_load(f) or {}
@@ -148,6 +151,22 @@ def load_config(config_path: Optional[str] = None) -> AppConfig:
     )
 
     return _config
+
+
+def save_config(config: Optional[AppConfig] = None) -> None:
+    """保存当前配置到 config.yaml。"""
+    global _config, _config_path
+    target = config or get_config()
+    path = _config_path or _find_config_file()
+    with open(path, "w", encoding="utf-8") as f:
+        yaml.safe_dump(
+            target.model_dump(mode="json"),
+            f,
+            allow_unicode=True,
+            sort_keys=False,
+        )
+    _config = target
+    logger.info(f"配置已保存: {path}")
 
 
 def get_config() -> AppConfig:
