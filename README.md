@@ -10,6 +10,7 @@ AnySQL is a FastAPI-based platform for analyzing SQL assets with an LLM, indexin
 - ChromaDB semantic search with Ollama-compatible embeddings.
 - SQL generation from product metadata and existing SQL knowledge.
 - Automatic knowledge growth: generated SQL is analyzed, persisted, and indexed without an extra manual registration step.
+- SQL-only assistant workflow: match existing SQL with LLM-scored confidence, generate when confidence is low, revise from user feedback, and learn every generated/revised result.
 - Web UI for search, product status, and analysis progress.
 - UTF-8 first handling for Chinese, Japanese, and English SQL assets.
 
@@ -65,6 +66,18 @@ Then open:
 - `GET /api/search?q={query}&product={product}&k={top_k}`
 - `POST /api/search`
 - `POST /api/generate/sql`
+- `POST /api/assistant/sql`
+
+### SQL Assistant
+
+`POST /api/assistant/sql` is the main user workflow. It is intentionally limited to SQL assistance:
+
+1. Retrieve candidate SQL by semantic search.
+2. Ask the LLM to score whether each candidate satisfies the user's requirement.
+3. Return an existing SQL when the LLM match score is high enough.
+4. Generate a new SQL from product metadata and known SQL knowledge when no candidate is good enough.
+5. Revise the current SQL when the user sends corrections or follow-up requirements.
+6. Persist every generated or revised SQL as local product knowledge and update the vector index automatically.
 
 ### Generate SQL and Learn
 

@@ -2,6 +2,15 @@
 
 All notable changes to AnySQL are documented in this file.
 
+## [0.1.3] - 2026-05-12
+
+### Added
+
+- Added SQL-only assistant API at `POST /api/assistant/sql`.
+- Added LLM-scored candidate matching before deciding whether to reuse existing SQL or generate a new one.
+- Added revision flow for user corrections against the current SQL, with automatic persistence and indexing.
+- Reworked the home page into a chat-style SQL assistant workspace with product selection, match scoring, current SQL context, and reset control.
+
 ## [0.1.2] - 2026-05-12
 
 ### Added

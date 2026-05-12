@@ -19,10 +19,12 @@ from anysql.logger import logger
 from anysql.models.schemas import (
     AnalysisProgress,
     AnalysisStatus,
+    SQLCandidateMatch,
     SQLRecord,
     SQLStatement,
     SQLAnalysis,
     GeneratedSQL,
+    SearchResult,
 )
 
 
@@ -82,6 +84,18 @@ class AnalysisPipeline:
         return snapshot
 
     @staticmethod
+    def _record_to_generated(record: SQLRecord) -> GeneratedSQL:
+        analysis = record.analysis
+        return GeneratedSQL(
+            sql=record.statement.raw_sql,
+            summary=analysis.summary if analysis else record.statement.comment,
+            business_meaning=" / ".join(analysis.business_context) if analysis else "",
+            usage_guide=analysis.usage_guide if analysis else "",
+            parameters=analysis.parameters if analysis else [],
+            tables=record.statement.tables,
+        )
+
+    @staticmethod
     def _next_generated_id(product_id: str, desc_dir: Path) -> str:
         existing = []
         for path in desc_dir.glob(f"{product_id}_generated_*.json"):
@@ -106,7 +120,12 @@ class AnalysisPipeline:
             f.write(block)
         return path.name, line_number
 
-    async def generate_and_learn(self, product_id: str, requirement: str, top_k: int = 5) -> SQLRecord:
+    async def _persist_generated_knowledge(
+        self,
+        product_id: str,
+        requirement: str,
+        generated: GeneratedSQL,
+    ) -> SQLRecord:
         if product_id not in self.config.products:
             raise ValueError(f"未知产品: {product_id}")
 
@@ -115,37 +134,6 @@ class AnalysisPipeline:
         if not collector.load_index():
             await collector.collect_all()
 
-        similar = await self.vector.search(requirement, product=product_id, top_k=top_k)
-        examples = []
-        for item in similar:
-            examples.append(
-                f"- {item.summary}\n"
-                f"  SQL: {item.raw_sql}\n"
-                f"  Context: {' / '.join(item.business_context)}"
-            )
-
-        index = collector.load_index() or {}
-        table_names = index.get("table_names", [])
-        table_hint = ", ".join(table_names[:200]) if isinstance(table_names, list) else ""
-
-        prompt = f"""你要为产品 {product_id} 生成一段满足业务需求的 SQL。
-
-业务需求:
-{requirement}
-
-可用表名候选（只展示前200个，必要时根据相似SQL推断）:
-{table_hint or "No metadata index available."}
-
-相似SQL知识:
-{chr(10).join(examples) if examples else "No similar SQL knowledge found."}
-
-要求:
-1. 优先复用相似SQL中的表、字段、日期条件和命名习惯。
-2. 如果需要参数，用清晰占位符，例如 :employee_no 或 :target_date。
-3. 输出 SQL 的用途、参数用法、业务含义、涉及表和假设。
-4. 只返回 JSON，不要返回 Markdown。
-"""
-        generated = await self.agent.execute_task(prompt, GeneratedSQL)
         sql = generated.sql.strip()
         if not sql:
             raise ValueError("LLM 未生成 SQL")
@@ -206,6 +194,150 @@ class AnalysisPipeline:
 
         logger.info(f"生成SQL已自动沉淀为知识: {record.statement.id}")
         return record
+
+    async def generate_and_learn(self, product_id: str, requirement: str, top_k: int = 5) -> SQLRecord:
+        if product_id not in self.config.products:
+            raise ValueError(f"未知产品: {product_id}")
+
+        product_cfg = self.config.products[product_id]
+        collector = MetadataCollector(product_cfg.database, product_cfg.metadata_dir)
+        if not collector.load_index():
+            await collector.collect_all()
+
+        similar = await self.vector.search(requirement, product=product_id, top_k=top_k)
+        examples = []
+        for item in similar:
+            examples.append(
+                f"- {item.summary}\n"
+                f"  SQL: {item.raw_sql}\n"
+                f"  Context: {' / '.join(item.business_context)}"
+            )
+
+        index = collector.load_index() or {}
+        table_names = index.get("table_names", [])
+        table_hint = ", ".join(table_names[:200]) if isinstance(table_names, list) else ""
+
+        prompt = f"""你要为产品 {product_id} 生成一段满足业务需求的 SQL。
+
+业务需求:
+{requirement}
+
+可用表名候选（只展示前200个，必要时根据相似SQL推断）:
+{table_hint or "No metadata index available."}
+
+相似SQL知识:
+{chr(10).join(examples) if examples else "No similar SQL knowledge found."}
+
+要求:
+1. 优先复用相似SQL中的表、字段、日期条件和命名习惯。
+2. 如果需要参数，用清晰占位符，例如 :employee_no 或 :target_date。
+3. 输出 SQL 的用途、参数用法、业务含义、涉及表和假设。
+4. 只返回 JSON，不要返回 Markdown。
+"""
+        generated = await self.agent.execute_task(prompt, GeneratedSQL)
+        return await self._persist_generated_knowledge(product_id, requirement, generated)
+
+    async def _llm_match_candidates(
+        self,
+        requirement: str,
+        candidates: list[SearchResult],
+    ) -> list[SQLCandidateMatch]:
+        if not candidates:
+            return []
+
+        candidate_text = "\n\n".join(
+            f"ID: {c.sql_id}\nVector score: {c.score}\nSummary: {c.summary}\nSQL: {c.raw_sql}"
+            for c in candidates
+        )
+        prompt = f"""请判断候选 SQL 是否满足用户需求，并给每个候选打 0 到 1 的匹配分。
+
+用户需求:
+{requirement}
+
+候选:
+{candidate_text}
+
+返回 JSON:
+{{
+  "matches": [
+    {{"sql_id": "...", "llm_score": 0.0, "reason": "简短理由"}}
+  ]
+}}
+"""
+        data = await self.llm.chat_json(
+            prompt=prompt,
+            system_prompt="你是 SQL 匹配评审助手，只返回严格 JSON。",
+            temperature=0.1,
+        )
+        llm_by_id = {
+            item.get("sql_id"): item
+            for item in data.get("matches", [])
+            if isinstance(item, dict)
+        }
+
+        matches: list[SQLCandidateMatch] = []
+        for candidate in candidates:
+            item = llm_by_id.get(candidate.sql_id, {})
+            try:
+                llm_score = float(item.get("llm_score", candidate.score))
+            except (TypeError, ValueError):
+                llm_score = candidate.score
+            matches.append(SQLCandidateMatch(
+                sql_id=candidate.sql_id,
+                vector_score=candidate.score,
+                llm_score=max(0, min(1, llm_score)),
+                reason=str(item.get("reason", "")),
+            ))
+        matches.sort(key=lambda m: m.llm_score, reverse=True)
+        return matches
+
+    async def revise_and_learn(
+        self,
+        product_id: str,
+        requirement: str,
+        current_sql: str,
+    ) -> SQLRecord:
+        prompt = f"""请根据用户修正意见改写 SQL。
+
+当前 SQL:
+{current_sql}
+
+用户修正意见:
+{requirement}
+
+要求:
+1. 保留原 SQL 的产品命名习惯和表字段风格。
+2. 输出改写后的 SQL、用途、参数用法、业务含义、涉及表和假设。
+3. 只返回 JSON。
+"""
+        generated = await self.agent.execute_task(prompt, GeneratedSQL)
+        return await self._persist_generated_knowledge(product_id, requirement, generated)
+
+    async def assist_sql(
+        self,
+        product_id: str,
+        message: str,
+        current_sql: str | None = None,
+        top_k: int = 5,
+        match_threshold: float = 0.78,
+    ) -> tuple[str, SQLRecord, list[SQLCandidateMatch], bool]:
+        if current_sql:
+            record = await self.revise_and_learn(product_id, message, current_sql)
+            return "revised", record, [], True
+
+        candidates = await self.vector.search(message, product=product_id, top_k=top_k)
+        matches = await self._llm_match_candidates(message, candidates)
+        best = matches[0] if matches else None
+        if best and best.llm_score >= match_threshold:
+            from anysql.harness.tasks import load_all_records
+            pcfg = self.config.products[product_id]
+            records = load_all_records(pcfg.desc_dir)
+            for record in records:
+                if record.statement.id == best.sql_id:
+                    return "matched", record, matches, False
+
+        record = await self.generate_and_learn(product_id, message, top_k=top_k)
+        return "generated", record, matches, True
 
     async def run(self, product_id: str, force: bool = False):
         if product_id not in self.config.products:

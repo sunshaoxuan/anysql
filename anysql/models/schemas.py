@@ -166,6 +166,36 @@ class SQLGenerationResponse(BaseModel):
     learned: bool = True
 
 
+class SQLCandidateMatch(BaseModel):
+    """候选 SQL 的模型匹配评估"""
+    sql_id: str
+    vector_score: float = Field(ge=0, le=1)
+    llm_score: float = Field(ge=0, le=1)
+    reason: str = ""
+
+
+class SQLAssistantRequest(BaseModel):
+    """SQL 辅助对话请求"""
+    product: str = Field(description="目标产品ID")
+    message: str = Field(description="用户需求或修正意见")
+    session_id: Optional[str] = Field(default=None, description="前端会话ID")
+    current_sql_id: Optional[str] = Field(default=None, description="当前正在修正的SQL ID")
+    current_sql: Optional[str] = Field(default=None, description="当前正在修正的SQL文本")
+    top_k: int = Field(default=5, ge=1, le=20)
+    match_threshold: float = Field(default=0.78, ge=0, le=1)
+
+
+class SQLAssistantResponse(BaseModel):
+    """SQL 辅助对话响应"""
+    product: str
+    session_id: Optional[str] = None
+    mode: str = Field(description="matched/generated/revised")
+    message: str
+    matches: list[SQLCandidateMatch] = Field(default_factory=list)
+    record: SQLRecord
+    learned: bool = False
+
+
 # ---------------------------------------------------------------------------
 # 产品与分析状态模型
 # ---------------------------------------------------------------------------

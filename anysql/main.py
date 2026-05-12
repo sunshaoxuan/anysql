@@ -63,10 +63,12 @@ templates = Jinja2Templates(directory=BASE_DIR / "web" / "templates")
 
 # 包含 API 路由
 from anysql.api.analysis import router as analysis_router
+from anysql.api.assistant import router as assistant_router
 from anysql.api.generation import router as generation_router
 from anysql.api.products import router as products_router
 from anysql.api.search import router as search_router
 app.include_router(analysis_router)
+app.include_router(assistant_router)
 app.include_router(generation_router)
 app.include_router(products_router)
 app.include_router(search_router)
@@ -74,7 +76,8 @@ app.include_router(search_router)
 # 页面路由
 @app.get("/", response_class=HTMLResponse)
 async def index_page(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+    config = app_state.get("config")
+    return templates.TemplateResponse("index.html", {"request": request, "products": config.products if config else {}})
 
 @app.get("/products", response_class=HTMLResponse)
 async def products_page(request: Request):
