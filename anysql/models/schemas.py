@@ -216,6 +216,7 @@ class ProductInfo(BaseModel):
     database_port: int = 1521
     database_service_name: Optional[str] = None
     database_username: Optional[str] = None
+    database_password: Optional[str] = None
     sql_count: int = 0
     analyzed_count: int = 0
     db_configured: bool = False

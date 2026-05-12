@@ -2,6 +2,13 @@
 
 All notable changes to AnySQL are documented in this file.
 
+## [0.1.8] - 2026-05-12
+
+### Changed
+
+- Product database passwords are treated as saved reference data and are returned to the editor.
+- Product password editing now supports masked display, reveal/hide, and copy controls.
+
 ## [0.1.7] - 2026-05-12
 
 ### Changed

@@ -52,6 +52,7 @@ async def list_products():
             database_port=pcfg.database.port,
             database_service_name=pcfg.database.service_name,
             database_username=pcfg.database.username,
+            database_password=pcfg.database.password,
             sql_count=sql_count,
             analyzed_count=analyzed,
             db_configured=pcfg.database.is_configured,
@@ -92,6 +93,7 @@ async def get_product(product_id: str):
         database_port=pcfg.database.port,
         database_service_name=pcfg.database.service_name,
         database_username=pcfg.database.username,
+        database_password=pcfg.database.password,
         sql_count=len(scan_product_sqls(pcfg.sql_dir, product_id)),
         analyzed_count=len(get_analyzed_ids(pcfg.desc_dir)),
         db_configured=pcfg.database.is_configured,
@@ -122,9 +124,6 @@ async def upsert_product(req: ProductUpsertRequest):
         pipeline = state.get("pipeline")
         if pipeline and original_id in pipeline._progress_map:
             pipeline._progress_map.pop(original_id, None)
-    password = req.database_password
-    if not password and existing:
-        password = existing.database.password
     config.products[req.code] = ProductConfig(
         physical_id=physical_id,
         name=req.name,
@@ -139,7 +138,7 @@ async def upsert_product(req: ProductUpsertRequest):
             port=req.database_port,
             service_name=req.database_service_name,
             username=req.database_username,
-            password=password,
+            password=req.database_password,
         ),
     )
     for d in [req.sql_dir, req.desc_dir, req.metadata_dir]:

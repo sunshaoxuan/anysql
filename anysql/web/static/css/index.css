@@ -601,6 +601,16 @@ body {
     font-weight: 400;
 }
 
+.password-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 38px 38px;
+    gap: 0.4rem;
+}
+
+.password-row input {
+    min-width: 0;
+}
+
 .product-form textarea {
     resize: vertical;
 }
