@@ -13,6 +13,7 @@ from anysql.config import AppConfig
 from anysql.core.agent_engine import AgentEngine
 from anysql.core.llm_client import LLMClient
 from anysql.core.sql_parser import _detect_type, _extract_tables, scan_product_sqls
+from anysql.core.sql_cleaner import add_sql_header_comment, clean_generated_sql, strip_sql_comments
 from anysql.core.vector_engine import VectorEngine
 from anysql.core.metadata_collector import MetadataCollector
 from anysql.logger import logger
@@ -103,16 +104,17 @@ JSONだけ返してください: {{"query_ja": "..."}}
 
     @staticmethod
     def _draft_record(product_id: str, requirement: str, generated: GeneratedSQL) -> SQLRecord:
-        sql = generated.sql.strip().rstrip(";") + ";"
-        tables = [t.upper() for t in generated.tables] or _extract_tables(sql)
+        executable_sql = clean_generated_sql(generated.sql)
+        display_sql = add_sql_header_comment(executable_sql, generated.summary, requirement)
+        tables = [t.upper() for t in generated.tables] or _extract_tables(executable_sql)
         stmt = SQLStatement(
             id=f"{product_id}_draft_{datetime.now().strftime('%Y%m%d%H%M%S')}",
             product=product_id,
             source_file="draft.sql",
-            raw_sql=sql,
+            raw_sql=display_sql,
             comment=f"Draft requirement: {requirement}",
             tables=tables,
-            statement_type=_detect_type(sql),
+            statement_type=_detect_type(strip_sql_comments(executable_sql)),
             line_number=0,
         )
         analysis = SQLAnalysis(

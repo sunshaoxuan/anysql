@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import time
 
 from sqlalchemy import delete, select, text
@@ -11,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from anysql.core.vector_engine import VectorEngine
 from anysql.models.schemas import SQLRecord, SearchResult
-from anysql.storage.models import MetadataEmbedding, MetadataTable, Product, SQLEmbedding
+from anysql.storage.models import MetadataColumn, MetadataEmbedding, MetadataTable, Product, SQLEmbedding
 
 
 class PGVectorRepository:
@@ -177,3 +178,63 @@ class PGVectorRepository:
             }
             for row in rows
         ]
+
+    def search_metadata_text(self, query: str, product_id: str, top_k: int = 8) -> list[dict]:
+        terms = [term for term in set(_tokenize_query(query)) if len(term) >= 2]
+        if not terms:
+            return []
+        conditions = []
+        params: dict[str, object] = {"product_id": product_id, "limit": top_k}
+        for idx, term in enumerate(terms[:12]):
+            key = f"term_{idx}"
+            params[key] = f"%{term}%"
+            conditions.append(
+                f"(mt.table_name ILIKE :{key} OR mt.comment ILIKE :{key} "
+                f"OR mc.column_name ILIKE :{key} OR mc.comment ILIKE :{key})"
+            )
+        rows = self.session.execute(text(f"""
+            SELECT mt.id, mt.table_name, mt.comment,
+                   COUNT(*) AS hit_count,
+                   STRING_AGG(DISTINCT mc.column_name || ':' || COALESCE(mc.comment, ''), E'\n') AS matched_columns
+            FROM metadata_tables mt
+            LEFT JOIN metadata_columns mc ON mc.metadata_table_id = mt.id
+            WHERE mt.product_id = :product_id AND ({' OR '.join(conditions)})
+            GROUP BY mt.id, mt.table_name, mt.comment
+            ORDER BY hit_count DESC, mt.table_name
+            LIMIT :limit
+        """), params).mappings().all()
+        results: list[dict] = []
+        for row in rows:
+            table = self.session.get(MetadataTable, row["id"])
+            document = self._metadata_doc(table) if table else str(row["table_name"] or "")
+            if row["matched_columns"]:
+                document = f"{document}\nMatched columns:\n{row['matched_columns']}"
+            results.append({
+                "id": row["table_name"],
+                "table": row["table_name"],
+                "score": min(1.0, 0.7 + float(row["hit_count"] or 0) / 20),
+                "document": document,
+                "source": "text",
+            })
+        return results
+
+
+def _tokenize_query(query: str) -> list[str]:
+    synonyms = {
+        "员工": ["社員", "職員", "職員番号", "社員番号"],
+        "姓名": ["氏名", "漢字氏名", "カナ氏名", "CNAMEKNJ", "CNAMEKNA"],
+        "名字": ["氏名", "漢字氏名", "CNAMEKNJ"],
+        "姓": ["氏名", "漢字氏名", "CNAMEKNJ"],
+        "基本信息": ["基本情報", "給与基本情報", "BTKIHON"],
+        "基本資料": ["基本情報", "給与基本情報", "BTKIHON"],
+        "异动": ["異動", "任免", "発令"],
+        "異動": ["異動", "任免", "発令"],
+    }
+    tokens = re.findall(r"[A-Za-z_][A-Za-z0-9_$#]*|[\u3040-\u30ff\u3400-\u9fff]{1,}", query or "")
+    expanded: list[str] = []
+    for token in tokens:
+        expanded.append(token)
+        for key, values in synonyms.items():
+            if key in token:
+                expanded.extend(values)
+    return expanded

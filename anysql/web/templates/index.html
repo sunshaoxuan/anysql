@@ -83,7 +83,7 @@ const SQL_KEYWORDS = new Set([
 ]);
 
 function stripSqlComments(sql) {
-    return String(sql || '')
+    return decodeHtmlEntities(String(sql || ''))
         .replace(/\/\*[\s\S]*?\*\//g, '')
         .split('\n')
         .map(line => line.replace(/--.*$/g, '').trimEnd())
@@ -91,8 +91,20 @@ function stripSqlComments(sql) {
         .join('\n');
 }
 
+function decodeHtmlEntities(text) {
+    const textarea = document.createElement('textarea');
+    let value = String(text || '');
+    for (let i = 0; i < 3; i += 1) {
+        textarea.innerHTML = value;
+        if (textarea.value === value) break;
+        value = textarea.value;
+    }
+    return value;
+}
+
 function formatSql(sql) {
-    let text = String(sql || '').replace(/\s+/g, ' ').trim();
+    let text = decodeHtmlEntities(String(sql || '')).replace(/\\n/g, '\n').replace(/\\'/g, "'").replace(/\\"/g, '"');
+    text = text.replace(/\s+/g, ' ').trim();
     if (!text) return '';
     const clauses = [
         'SELECT', 'FROM', 'WHERE', 'GROUP BY', 'HAVING', 'ORDER BY',
@@ -186,7 +198,7 @@ function renderRecord(response) {
     const analysis = record.analysis || {};
     const stmt = record.statement || {};
     currentSqlId = stmt.id;
-    currentSql = stmt.raw_sql || '';
+    currentSql = decodeHtmlEntities(stmt.raw_sql || '');
 
     const meta = document.getElementById('currentSqlMeta');
     meta.dataset.empty = 'false';
@@ -204,9 +216,9 @@ function renderRecord(response) {
     renderSql();
     renderMatches(response.matches || []);
 
-    const learnedBadge = response.learned
-        ? '<span class="badge badge-green">Learned</span>'
-        : '<span class="badge badge-blue">Matched</span>';
+    const badgeText = response.learned ? 'Learned' : (response.mode || 'draft').toUpperCase();
+    const badgeClass = response.learned ? 'badge-green' : (response.mode === 'matched' ? 'badge-blue' : 'badge-green');
+    const learnedBadge = `<span class="badge ${badgeClass}">${escapeHtml(badgeText)}</span>`;
     addMessage('assistant', `
         <div class="result-head">
             ${learnedBadge}
