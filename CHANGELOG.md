@@ -2,6 +2,15 @@
 
 All notable changes to AnySQL are documented in this file.
 
+## [0.3.2] - 2026-05-12
+
+### Fixed
+
+- Removed the hardcoded surname example from runtime LLM prompts to avoid generated SQL copying sample values.
+- Added SQL cleanup coverage for explicit surname requests so generated name filters preserve the user's actual value, including `丰田` / `豊田`.
+- Removed generated employee-number OR conditions from surname/name searches when the user only asked for a name filter.
+- Normalized mixed literal-plus-parameter LIKE clauses such as `LIKE '丰田%' || :name || '%'` into directly executable SQL.
+
 ## [0.3.1] - 2026-05-12
 
 ### Changed

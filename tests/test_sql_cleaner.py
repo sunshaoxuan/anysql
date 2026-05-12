@@ -2,8 +2,8 @@ from anysql.core.sql_cleaner import add_sql_header_comment, clean_generated_sql,
 
 
 def test_clean_generated_sql_decodes_entities_and_removes_escaped_quotes():
-    sql = "SELECT * FROM MAST_EMPLOYEES WHERE ME_CKANJINAME LIKE &amp;#39;松下%&amp;#39;"
-    assert clean_generated_sql(sql) == "SELECT * FROM MAST_EMPLOYEES WHERE ME_CKANJINAME LIKE '松下%';"
+    sql = "SELECT * FROM MAST_EMPLOYEES WHERE ME_CKANJINAME LIKE &amp;#39;田中%&amp;#39;"
+    assert clean_generated_sql(sql) == "SELECT * FROM MAST_EMPLOYEES WHERE ME_CKANJINAME LIKE '田中%';"
 
 
 def test_clean_generated_sql_removes_non_ascii_column_aliases():
@@ -21,15 +21,15 @@ def test_add_sql_header_comment_uses_japanese_multiline_template():
 
 def test_preserve_requirement_literal_replaces_broken_placeholder_like():
     sql = "SELECT TSYAMEI FROM XKSAGAKU WHERE TSYAMEI LIKE '[:1]%'"
-    assert preserve_requirement_literal(sql, "查一下所有姓“松下”的员工") == (
-        "SELECT TSYAMEI FROM XKSAGAKU WHERE TSYAMEI LIKE '松下%';"
+    assert preserve_requirement_literal(sql, "查一下所有姓“丰田”的员工") == (
+        "SELECT TSYAMEI FROM XKSAGAKU WHERE TSYAMEI LIKE '丰田%';"
     )
 
 
 def test_preserve_requirement_literal_removes_name_filter_from_employee_number():
     sql = "SELECT TSYAKKANMEI FROM XKSAGAKU\nWHERE TSYAKKANMEI LIKE '%%'\n  OR CSHAINNO LIKE '%%'"
-    assert preserve_requirement_literal(sql, "查一下所有姓“松下”的员工") == (
-        "SELECT TSYAKKANMEI FROM XKSAGAKU\nWHERE TSYAKKANMEI LIKE '松下%';"
+    assert preserve_requirement_literal(sql, "查一下所有姓“佐藤”的员工") == (
+        "SELECT TSYAKKANMEI FROM XKSAGAKU\nWHERE TSYAKKANMEI LIKE '佐藤%';"
     )
 
 
@@ -40,8 +40,8 @@ WHERE (:name IS NULL
        OR CNAMEKNA_MEI LIKE :name || '%')
   AND (:shainno IS NULL
        OR CSHAINNO = :shainno)"""
-    assert preserve_requirement_literal(sql, "查一下所有姓“松下”的员工") == (
-        "SELECT CSHAINNO, CNAMEKNA_MEI\nFROM WKDJNS6500_01\nWHERE CNAMEKNA_MEI LIKE '松下%';"
+    assert preserve_requirement_literal(sql, "查一下所有姓“山田”的员工") == (
+        "SELECT CSHAINNO, CNAMEKNA_MEI\nFROM WKDJNS6500_01\nWHERE CNAMEKNA_MEI LIKE '山田%';"
     )
 
 
@@ -51,6 +51,31 @@ FROM UWZAIKIHON
 WHERE CNAMEKNJ LIKE '$_PARAM_NAME%'
   AND CMNCOMP = '$_PARAM_COMPANY'
   AND DMNDATE >= TO_DATE('$_PARAM_DATE', 'YYYY/MM/DD')"""
-    assert preserve_requirement_literal(sql, "查一下所有姓“松下”的员工") == (
-        "SELECT CSHAINNO, CNAMEKNJ, DBIRTH_DTE\nFROM UWZAIKIHON\nWHERE CNAMEKNJ LIKE '松下%';"
+    assert preserve_requirement_literal(sql, "查一下所有姓“豊田”的员工") == (
+        "SELECT CSHAINNO, CNAMEKNJ, DBIRTH_DTE\nFROM UWZAIKIHON\nWHERE CNAMEKNJ LIKE '豊田%';"
+    )
+
+
+def test_preserve_requirement_literal_overrides_llm_example_name():
+    sql = "SELECT DISTINCT CSHAINNO, CNAMEKNJ FROM XKYTSIKYU WHERE CNAMEKNJ LIKE '山田%'"
+    assert preserve_requirement_literal(sql, "查一下所有姓“丰田”的员工") == (
+        "SELECT DISTINCT CSHAINNO, CNAMEKNJ FROM XKYTSIKYU WHERE CNAMEKNJ LIKE '丰田%';"
+    )
+
+
+def test_preserve_requirement_literal_removes_mixed_literal_and_parameter_like():
+    sql = "SELECT CNAMEKNA_MEI FROM WKDJNS6500_01 WHERE CNAMEKNA_MEI LIKE '丰田%' || :name || '%'"
+    assert preserve_requirement_literal(sql, "查一下所有姓“丰田”的员工") == (
+        "SELECT CNAMEKNA_MEI FROM WKDJNS6500_01 WHERE CNAMEKNA_MEI LIKE '丰田%';"
+    )
+
+
+def test_preserve_requirement_literal_removes_leading_employee_number_or_condition():
+    sql = """SELECT x.CSHAINNO, w.CNAMEKNJ
+FROM XKYTSIKYU x
+JOIN WPT_DJNP54106M_01 w ON x.CSHAINNO = w.CSHAINNO
+WHERE x.CSHAINNO LIKE '123456%'
+  OR w.CNAMEKNJ LIKE '丰田%'"""
+    assert preserve_requirement_literal(sql, "查一下所有姓“丰田”的员工") == (
+        "SELECT x.CSHAINNO, w.CNAMEKNJ\nFROM XKYTSIKYU x\nJOIN WPT_DJNP54106M_01 w ON x.CSHAINNO = w.CSHAINNO\nWHERE w.CNAMEKNJ LIKE '丰田%';"
     )

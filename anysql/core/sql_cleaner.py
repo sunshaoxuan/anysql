@@ -68,6 +68,18 @@ def preserve_requirement_literal(sql: str, requirement: str) -> str:
     text = re.sub(r"LIKE\s+'%{2,}'", f"LIKE '{escaped}%'", text, flags=re.IGNORECASE)
     if any(word in str(requirement or "") for word in ("姓", "姓名", "名字", "氏名")):
         text = re.sub(
+            r"((?:C?NAME|KANJI|KANA|MEI|SHIMEI|SIMEI|氏名)[\w.]*\s+LIKE\s+)'[^']*%'",
+            rf"\1'{escaped}%'",
+            text,
+            flags=re.IGNORECASE,
+        )
+        text = re.sub(
+            rf"((?:C?NAME|KANJI|KANA|MEI|SHIMEI|SIMEI|氏名)[\w.]*\s+LIKE\s+)'{re.escape(escaped)}%'\s*\|\|\s*:[A-Za-z_][A-Za-z0-9_]*\s*\|\|\s*'%'",
+            rf"\1'{escaped}%'",
+            text,
+            flags=re.IGNORECASE,
+        )
+        text = re.sub(
             rf"\n\s+(?:OR|AND)\s+[\w.]*?(?:SHAIN|EMPLOYEE|CEMPLOYEE|NO|ID)[\w.]*\s+LIKE\s+'{re.escape(escaped)}%';?",
             "",
             text,
@@ -76,6 +88,12 @@ def preserve_requirement_literal(sql: str, requirement: str) -> str:
         text = re.sub(
             r"\n\s+(?:OR|AND)\s+\(\s*:[A-Za-z_]*(?:shain|employee|cemployee|no|id)[A-Za-z0-9_]*\s+IS\s+NULL\s+OR\s+[\w.]*?(?:SHAIN|EMPLOYEE|CEMPLOYEE|NO|ID)[\w.]*\s*=\s*:[A-Za-z_]*(?:shain|employee|cemployee|no|id)[A-Za-z0-9_]*\s*\)",
             "",
+            text,
+            flags=re.IGNORECASE,
+        )
+        text = re.sub(
+            rf"WHERE\s+[\w.]*?(?:SHAIN|EMPLOYEE|CEMPLOYEE|NO|ID)[\w.]*\s+LIKE\s+'[^']*'\s+OR\s+((?:[\w.]*?(?:C?NAME|KANJI|KANA|MEI|SHIMEI|SIMEI|氏名)[\w.]*)\s+LIKE\s+'{re.escape(escaped)}%')",
+            r"WHERE \1",
             text,
             flags=re.IGNORECASE,
         )
