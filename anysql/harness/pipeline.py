@@ -36,6 +36,7 @@ class AnalysisPipeline:
         self.agent = agent
         # 核心状态存储：确保全局唯一且持久
         self._progress_map: dict[str, AnalysisProgress] = {}
+        self._metadata_sync_status: dict[str, dict] = {}
 
     def get_progress(self, product: str) -> AnalysisProgress:
         """核心修复：如果内存中已存在进度对象，必须返回同一个对象，而不是新建"""
@@ -238,7 +239,7 @@ JSONだけ返してください: {{"query_ja": "..."}}
         progress.total = len(scan_product_sqls(product_cfg.sql_dir, product_id))
         progress.completed = len(list(desc_dir.glob("*.json")))
 
-        logger.info(f"生成SQL已自动沉淀为知识: {record.statement.id}")
+        logger.info(f"人工确认SQL已沉淀为知识: {record.statement.id}")
         return record
 
     async def generate_and_learn(self, product_id: str, requirement: str, top_k: int = 5) -> SQLRecord:
@@ -395,6 +396,55 @@ Metadata RAG 候选（优先参考）:
     ) -> SQLRecord:
         """人工确认后，将草稿 SQL 落盘并进入向量知识库。"""
         return await self._persist_generated_knowledge(product_id, requirement, generated)
+
+    async def sync_product_metadata(self, product_id: str) -> dict:
+        """从产品数据库差异采集 Metadata，并更新 Metadata 向量库。"""
+        if product_id not in self.config.products:
+            raise ValueError(f"未知产品: {product_id}")
+
+        started_at = datetime.now()
+        self._metadata_sync_status[product_id] = {
+            "status": "running",
+            "product": product_id,
+            "started_at": started_at.isoformat(),
+        }
+        try:
+            product_cfg = self.config.products[product_id]
+            collector = MetadataCollector(product_cfg.database, product_cfg.metadata_dir)
+            index = await collector.collect_all(use_cache=False)
+            indexed_count = await self.vector.index_metadata(product_id, product_cfg.metadata_dir)
+            result = {
+                "status": "synced",
+                "product": product_id,
+                "indexed_count": indexed_count,
+                "table_count": (index or {}).get("table_count", 0),
+                "elapsed_seconds": round((datetime.now() - started_at).total_seconds(), 2),
+            }
+            self._metadata_sync_status[product_id] = result
+            return result
+        except Exception as e:
+            logger.error(f"产品Metadata同步失败 {product_id}: {e}")
+            result = {
+                "status": "failed",
+                "product": product_id,
+                "error": str(e),
+                "elapsed_seconds": round((datetime.now() - started_at).total_seconds(), 2),
+            }
+            self._metadata_sync_status[product_id] = result
+            return result
+
+    async def sync_all_metadata(self) -> list[dict]:
+        """按产品顺序执行每日 Metadata 差异同步。"""
+        results = []
+        for product_id in list(self.config.products.keys()):
+            results.append(await self.sync_product_metadata(product_id))
+        return results
+
+    def get_metadata_sync_status(self, product_id: str) -> dict:
+        return self._metadata_sync_status.get(product_id, {
+            "status": "idle",
+            "product": product_id,
+        })
 
     async def assist_sql(
         self,

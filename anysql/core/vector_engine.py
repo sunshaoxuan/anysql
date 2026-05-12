@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import time
 import json
+import hashlib
 from pathlib import Path
 from typing import Optional
 
@@ -298,9 +299,8 @@ class VectorEngine:
         if limit:
             files = files[:limit]
 
-        docs: list[str] = []
-        ids: list[str] = []
-        metadatas: list[dict] = []
+        docs_by_id: dict[str, str] = {}
+        metadatas_by_id: dict[str, dict] = {}
         for path in files:
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
@@ -308,24 +308,53 @@ class VectorEngine:
                 logger.warning(f"跳过无效元数据 {path}: {e}")
                 continue
             table = path.stem.upper()
-            docs.append(self._metadata_doc(table, data))
-            ids.append(f"{product}_table_{table}")
-            metadatas.append({"product": product, "table": table, "source_file": path.name})
+            doc = self._metadata_doc(table, data)
+            doc_id = f"{product}_table_{table}"
+            docs_by_id[doc_id] = doc
+            metadatas_by_id[doc_id] = {
+                "product": product,
+                "table": table,
+                "source_file": path.name,
+                "doc_hash": hashlib.sha256(doc.encode("utf-8")).hexdigest(),
+            }
 
-        if not docs:
+        if not docs_by_id:
             return 0
 
-        embeddings = await self.llm.embed(docs)
-        valid = [i for i, emb in enumerate(embeddings) if emb]
         collection = self._get_or_create_metadata_collection(product)
+        existing = collection.get(where={"product": product}, include=["metadatas"])
+        existing_hashes = {
+            doc_id: meta.get("doc_hash", "")
+            for doc_id, meta in zip(existing.get("ids", []), existing.get("metadatas", []))
+            if isinstance(meta, dict)
+        }
+        current_ids = set(docs_by_id)
+        stale_ids = [doc_id for doc_id in existing_hashes if doc_id not in current_ids]
+        if stale_ids:
+            collection.delete(ids=stale_ids)
+
+        changed_ids = [
+            doc_id for doc_id in docs_by_id
+            if existing_hashes.get(doc_id) != metadatas_by_id[doc_id]["doc_hash"]
+        ]
+        if not changed_ids:
+            logger.info(f"元数据向量索引无变化: {product}")
+            return 0
+
+        changed_docs = [docs_by_id[doc_id] for doc_id in changed_ids]
+        embeddings = await self.llm.embed(changed_docs)
+        valid = [i for i, emb in enumerate(embeddings) if emb]
         if valid:
             collection.upsert(
-                ids=[ids[i] for i in valid],
-                documents=[docs[i] for i in valid],
-                metadatas=[metadatas[i] for i in valid],
+                ids=[changed_ids[i] for i in valid],
+                documents=[changed_docs[i] for i in valid],
+                metadatas=[metadatas_by_id[changed_ids[i]] for i in valid],
                 embeddings=[embeddings[i] for i in valid],
             )
-        logger.info(f"元数据向量索引完成: {product} {len(valid)}/{len(docs)}")
+        logger.info(
+            f"元数据差异向量索引完成: {product} changed={len(valid)}/{len(changed_ids)}, "
+            f"stale={len(stale_ids)}, total={len(docs_by_id)}"
+        )
         return len(valid)
 
     async def search_metadata(self, query: str, product: str, top_k: int = 8) -> list[dict]:

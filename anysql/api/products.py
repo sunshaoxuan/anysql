@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 
 from anysql.config import DatabaseConfig, ProductConfig, save_config
 from anysql.logger import logger
@@ -101,7 +101,7 @@ async def get_product(product_id: str):
 
 
 @router.post("", response_model=ProductInfo)
-async def upsert_product(req: ProductUpsertRequest):
+async def upsert_product(req: ProductUpsertRequest, background_tasks: BackgroundTasks):
     """新增或更新产品配置"""
     state = _get_app_state()
     config = state["config"]
@@ -118,6 +118,7 @@ async def upsert_product(req: ProductUpsertRequest):
         original_id = req.code
         existing = config.products[req.code]
 
+    is_new_product = existing is None
     physical_id = req.physical_id or (existing.physical_id if existing else "") or str(uuid4())
     if original_id and original_id != req.code:
         config.products.pop(original_id)
@@ -146,6 +147,9 @@ async def upsert_product(req: ProductUpsertRequest):
         Path(d).mkdir(parents=True, exist_ok=True)
     save_config(config)
     logger.info(f"产品配置已更新: {original_id or req.code} -> {req.code}")
+    pipeline = state.get("pipeline")
+    if is_new_product and pipeline:
+        background_tasks.add_task(pipeline.sync_product_metadata, req.code)
     return await get_product(req.code)
 
 

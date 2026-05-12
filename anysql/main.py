@@ -3,6 +3,7 @@ AnySQL 主程序 — 最终稳健版
 """
 
 import os
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 import urllib.parse
@@ -23,6 +24,18 @@ from anysql.logger import logger
 # 全局应用状态
 app_state = {}
 BASE_DIR = Path(__file__).resolve().parent
+
+
+async def _daily_metadata_sync_loop(pipeline: AnalysisPipeline):
+    """每日执行一次产品 Metadata 差异同步。"""
+    try:
+        while True:
+            await asyncio.sleep(24 * 60 * 60)
+            logger.info("每日 Metadata 差异同步开始")
+            await pipeline.sync_all_metadata()
+    except asyncio.CancelledError:
+        logger.info("每日 Metadata 差异同步任务已停止")
+        raise
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -47,11 +60,19 @@ async def lifespan(app: FastAPI):
         "llm": llm,
         "vector": vector,
         "agent": agent,
-        "pipeline": pipeline
+        "pipeline": pipeline,
+        "metadata_sync_task": asyncio.create_task(_daily_metadata_sync_loop(pipeline)),
     })
     
     logger.info("=== AnySQL 已就绪 ===")
     yield
+    sync_task = app_state.get("metadata_sync_task")
+    if sync_task:
+        sync_task.cancel()
+        try:
+            await sync_task
+        except asyncio.CancelledError:
+            pass
     await llm.close()
     logger.info("=== AnySQL 正在关闭... ===")
 

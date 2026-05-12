@@ -2,6 +2,25 @@
 
 All notable changes to AnySQL are documented in this file.
 
+## [0.1.10] - 2026-05-12
+
+### Added
+
+- New products now automatically start an initial Metadata sync from the configured database after save.
+- Added `POST /api/analysis/{product}/metadata-sync` for manual background database Metadata sync plus vector refresh.
+- Added `GET /api/analysis/{product}/metadata-sync` for Metadata sync status.
+- Added a Product management sync action for manually refreshing Metadata.
+- Added a daily in-process Metadata differential sync task.
+
+### Changed
+
+- Oracle Metadata collection now writes table and column comment snapshots into product metadata files.
+- Metadata vector indexing is now differential and only embeds changed Metadata documents while deleting stale entries.
+
+### Fixed
+
+- Fixed the Product management new-product focus target.
+
 ## [0.1.9] - 2026-05-12
 
 ### Added

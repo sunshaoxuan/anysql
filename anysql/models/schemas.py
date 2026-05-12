@@ -158,7 +158,7 @@ class GeneratedSQL(BaseModel):
 
 
 class SQLGenerationResponse(BaseModel):
-    """SQL 生成响应，同时返回自动沉淀后的记录"""
+    """SQL 生成响应，默认返回待人工确认的草稿记录"""
     product: str
     requirement: str
     generated: GeneratedSQL

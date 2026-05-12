@@ -9,13 +9,14 @@ AnySQL is a FastAPI-based platform for analyzing SQL assets with an LLM, indexin
 - Metadata-aware analysis using local database metadata snapshots.
 - ChromaDB semantic search with Ollama-compatible embeddings.
 - SQL generation from product metadata and existing SQL knowledge.
-- Automatic knowledge growth: generated SQL is analyzed, persisted, and indexed without an extra manual registration step.
-- SQL-only assistant workflow: match existing SQL with LLM-scored confidence, generate when confidence is low, revise from user feedback, and learn every generated/revised result.
+- Human-approved knowledge growth: generated SQL is returned as a draft and enters the knowledge base only after explicit acceptance.
+- SQL-only assistant workflow: match existing SQL with LLM-scored confidence, generate when confidence is low, revise from user feedback, and learn accepted generated/revised results.
 - Desktop-first SQL workbench with a 1K minimum layout, expanded SQL viewer, syntax coloring, basic SQL formatting, and optional comment stripping for tools with weak comment handling.
 - Japanese, Chinese, and English UI language switching, defaulting to Japanese.
 - Product management for adding/editing product definitions and always-on product rules used as LLM guardrails.
 - Japanese is the retrieval pivot language because product metadata is usually stored in Japanese; non-Japanese user requests are normalized before retrieval.
 - Product metadata can be vectorized for RAG and used alongside known SQL examples.
+- New products automatically start an initial Metadata sync from the configured database; later syncs are differential, can be triggered manually, and also run daily while the service is running.
 - Generated or revised SQL is returned as a draft and is only written to the knowledge base after explicit user acceptance.
 - Web UI for search, product status, and analysis progress.
 - UTF-8 first handling for Chinese, Japanese, and English SQL assets.
@@ -53,14 +54,14 @@ Edit `config.yaml` for your local LLM endpoint, product directories, and databas
 ## Run
 
 ```powershell
-python -m uvicorn anysql.main:app --host 127.0.0.1 --port 8768
+python -m uvicorn anysql.main:app --host 127.0.0.1 --port 8765
 ```
 
 Then open:
 
-- Search UI: `http://127.0.0.1:8768/`
-- Product page: `http://127.0.0.1:8768/products`
-- Analysis dashboard: `http://127.0.0.1:8768/analysis`
+- Search UI: `http://127.0.0.1:8765/`
+- Product page: `http://127.0.0.1:8765/products`
+- Analysis dashboard: `http://127.0.0.1:8765/analysis`
 
 The main SQL assistant UI is desktop-first and targets screens of at least 1024px width.
 AnySQL does not require user login in the current local deployment model.
@@ -78,6 +79,8 @@ AnySQL does not require user login in the current local deployment model.
 - `POST /api/assistant/sql`
 - `POST /api/assistant/learn`
 - `POST /api/analysis/{product}/metadata-index`
+- `POST /api/analysis/{product}/metadata-sync`
+- `GET /api/analysis/{product}/metadata-sync`
 
 ### SQL Assistant
 
@@ -88,11 +91,11 @@ AnySQL does not require user login in the current local deployment model.
 3. Return an existing SQL when the LLM match score is high enough.
 4. Generate a new SQL from product metadata and known SQL knowledge when no candidate is good enough.
 5. Revise the current SQL when the user sends corrections or follow-up requirements.
-6. Persist every generated or revised SQL as local product knowledge and update the vector index automatically.
+6. Persist accepted generated or revised SQL as local product knowledge and update the vector index.
 
 ### Generate SQL and Learn
 
-`POST /api/generate/sql` accepts a product and natural-language requirement. The service retrieves similar SQL knowledge, injects product metadata context, generates SQL, analyzes the generated SQL, saves it into the local product SQL/description store, and updates the vector index.
+`POST /api/generate/sql` accepts a product and natural-language requirement. The service retrieves similar SQL knowledge, injects product metadata context, and returns a draft SQL. Use `POST /api/assistant/learn` after human acceptance to save it into the local product SQL/description store and update the vector index.
 
 Example:
 
@@ -125,6 +128,6 @@ python -m compileall anysql
 For a running app, basic smoke checks:
 
 ```powershell
-Invoke-WebRequest http://127.0.0.1:8768/api/products
-Invoke-WebRequest "http://127.0.0.1:8768/api/search?q=test&k=3"
+Invoke-WebRequest http://127.0.0.1:8765/api/products
+Invoke-WebRequest "http://127.0.0.1:8765/api/search?q=test&k=3"
 ```

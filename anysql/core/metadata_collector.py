@@ -41,10 +41,10 @@ class MetadataCollector:
     async def close(self):
         if self._conn: await self._conn.close()
 
-    async def collect_all(self) -> Optional[dict]:
-        """极速采集：如果本地已有 tables，则直接构建索引，不查数据库"""
+    async def collect_all(self, use_cache: bool = True) -> Optional[dict]:
+        """采集可用表/字段元数据；已有大量本地分片时只重建索引。"""
         local_files = list(self.tables_dir.glob("*.json"))
-        if len(local_files) > 1000:
+        if use_cache and len(local_files) > 1000:
             logger.info(f"检测到本地已有 {len(local_files)} 个元数据分片，正在跳过数据库采集直接构建索引...")
             table_names = [f.stem for f in local_files]
             index = {
@@ -58,23 +58,84 @@ class MetadataCollector:
                 json.dump(index, f, ensure_ascii=False, indent=2)
             return index
 
-        # 否则才去查数据库 (逻辑同前)
         if not await self.connect(): return None
         try:
-            # ... (抓取逻辑省略，保持极速版精简)
             return await self._real_collect()
         finally:
             await self.close()
 
     async def _real_collect(self):
-        # 只有在本地为空时才调用的原始逻辑
-        names = []
+        tables: dict[str, dict] = {}
         async with self._conn.cursor() as cursor:
-            await cursor.execute("SELECT TABLE_NAME FROM USER_CATALOG WHERE TABLE_TYPE IN ('TABLE','VIEW')")
+            await cursor.execute("""
+                SELECT table_name, comments
+                FROM user_tab_comments
+                WHERE table_type IN ('TABLE', 'VIEW')
+                ORDER BY table_name
+            """)
             rows = await cursor.fetchall()
-            for r in rows: names.append(r[0])
-        # 此处简化，仅为补全索引
-        return {"table_names": names}
+            for table_name, comments in rows:
+                tables[str(table_name).upper()] = {
+                    "name": str(table_name).upper(),
+                    "comment": comments or "",
+                    "columns": [],
+                }
+
+            await cursor.execute("""
+                SELECT
+                    c.table_name,
+                    c.column_name,
+                    c.data_type,
+                    c.data_length,
+                    c.data_precision,
+                    c.data_scale,
+                    c.nullable,
+                    cc.comments
+                FROM user_tab_columns c
+                LEFT JOIN user_col_comments cc
+                  ON cc.table_name = c.table_name
+                 AND cc.column_name = c.column_name
+                WHERE c.table_name IN (
+                    SELECT table_name
+                    FROM user_tab_comments
+                    WHERE table_type IN ('TABLE', 'VIEW')
+                )
+                ORDER BY c.table_name, c.column_id
+            """)
+            rows = await cursor.fetchall()
+            for row in rows:
+                table_name = str(row[0]).upper()
+                tables.setdefault(table_name, {
+                    "name": table_name,
+                    "comment": "",
+                    "columns": [],
+                })
+                tables[table_name]["columns"].append({
+                    "name": row[1],
+                    "data_type": row[2],
+                    "data_length": row[3],
+                    "data_precision": row[4],
+                    "data_scale": row[5],
+                    "nullable": row[6],
+                    "comment": row[7] or "",
+                })
+
+        for table_name, data in tables.items():
+            path = self.tables_dir / f"{table_name}.json"
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+
+        index = {
+            "database_type": "oracle",
+            "table_names": sorted(tables),
+            "program_names": [],
+            "table_count": len(tables),
+            "program_count": 0,
+        }
+        with open(self.output_dir / "index.json", "w", encoding="utf-8") as f:
+            json.dump(index, f, ensure_ascii=False, indent=2)
+        logger.info(f"数据库元数据采集完成: tables={len(tables)}")
+        return index
 
     def get_table_metadata(self, name: str) -> Optional[dict]:
         file_path = self.tables_dir / f"{name.upper()}.json"

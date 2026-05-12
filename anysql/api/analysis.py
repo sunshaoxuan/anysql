@@ -44,3 +44,25 @@ async def index_metadata(product: str):
     pcfg = pipeline.config.products[product]
     count = await pipeline.vector.index_metadata(product, pcfg.metadata_dir)
     return {"status": "indexed", "product": product, "count": count}
+
+
+@router.post("/{product}/metadata-sync")
+async def sync_metadata(product: str, background_tasks: BackgroundTasks):
+    """手动启动数据库 Metadata 差异同步，并更新向量索引。"""
+    pipeline = _get_pipeline()
+    if product not in pipeline.config.products:
+        raise HTTPException(status_code=404, detail=f"产品不存在: {product}")
+    status = pipeline.get_metadata_sync_status(product)
+    if status.get("status") == "running":
+        return status
+    background_tasks.add_task(pipeline.sync_product_metadata, product)
+    return {"status": "started", "product": product}
+
+
+@router.get("/{product}/metadata-sync")
+async def get_metadata_sync_status(product: str):
+    """获取 Metadata 同步状态。"""
+    pipeline = _get_pipeline()
+    if product not in pipeline.config.products:
+        raise HTTPException(status_code=404, detail=f"产品不存在: {product}")
+    return pipeline.get_metadata_sync_status(product)
