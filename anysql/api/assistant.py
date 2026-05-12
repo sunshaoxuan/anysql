@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException
 
+from anysql.core.query_expansion import expand_query_for_metadata
 from anysql.core.sql_cleaner import clean_generated_sql
 from anysql.models.schemas import AnalysisStatus, GeneratedSQL, SQLAssistantRequest, SQLAssistantResponse, SQLLearnRequest
 from anysql.storage.pgvector_engine import PGVectorRepository
@@ -46,7 +47,7 @@ async def assist_sql(req: SQLAssistantRequest):
         try:
             pipeline = state["pipeline"]
             if current_sql:
-                query_ja = await pipeline._normalize_query_to_japanese(req.message)
+                query_ja = expand_query_for_metadata(req.message)
                 with storage.database.session() as search_session:
                     product = ProductRepository(search_session).get_by_code(req.product)
                     vector = PGVectorRepository(search_session, state["llm"], config.llm.embed_model)
@@ -66,14 +67,17 @@ async def assist_sql(req: SQLAssistantRequest):
                 record = pipeline._draft_record(req.product, req.message, generated)
                 mode, matches, learned = "revised", [], False
             else:
-                query_ja = await pipeline._normalize_query_to_japanese(req.message)
+                query_ja = expand_query_for_metadata(req.message)
                 with storage.database.session() as search_session:
                     product = ProductRepository(search_session).get_by_code(req.product)
                     vector = PGVectorRepository(search_session, state["llm"], config.llm.embed_model)
                     candidates = await vector.search(query_ja, req.product, req.top_k)
                     metadata_hits = await vector.search_metadata(query_ja, product.id, 8)
                     metadata_hits = _merge_metadata_hits(metadata_hits, vector.search_metadata_text(f"{req.message} {query_ja}", product.id, 10))
-                matches = await pipeline._llm_match_candidates(req.product, f"{req.message}\n日文检索意图: {query_ja}", candidates)
+                top_vector_score = max((item.score for item in candidates), default=0.0)
+                matches = []
+                if top_vector_score >= max(0.68, req.match_threshold - 0.08):
+                    matches = await pipeline._llm_match_candidates(req.product, f"{req.message}\n检索扩展: {query_ja}", candidates)
                 best = matches[0] if matches else None
                 if best and best.llm_score >= req.match_threshold:
                     with storage.database.session() as record_session:
@@ -267,8 +271,9 @@ async def _generate_sql_from_context(
 5. 必须保留用户的过滤语义：如果用户说“姓/姓名/氏名/名字”，WHERE 条件必须作用在姓名类字段上，使用 LIKE 或可参数化的前方/部分一致；不得改写成员工编号、职员编号或其他代码字段。
 6. SQL 必须是可直接执行的 Oracle SQL，不能出现 HTML 实体、反斜杠转义、Markdown、JSON 字符串转义。
 7. SQL 字符串字面量必须直接使用单引号，例如 LIKE '松下%'。
-8. 在 SQL 开头生成 1-2 行 -- 注释，说明用途和参数。
-9. 输出 JSON，字段必须符合 GeneratedSQL schema。
+8. SQL 注释只能使用日语；禁止中文注释。SELECT 列别名原则上不要生成，必要时只能使用 ASCII 别名，禁止中文/日文别名。
+9. 在 SQL 开头生成 1-2 行 -- 注释，说明用途和参数。
+10. 输出 JSON，字段必须符合 GeneratedSQL schema。
 """
     return await state["agent"].execute_task(prompt, GeneratedSQL)
 

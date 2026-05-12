@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
+from anysql.core.query_expansion import expand_query_for_metadata
 from anysql.core.sql_cleaner import clean_generated_sql
 from anysql.models.schemas import (
     GeneratedSQL,
@@ -44,7 +45,7 @@ async def generate_sql(req: SQLGenerationRequest):
     pipeline = state["pipeline"]
     try:
         if storage and storage.is_database_mode:
-            query_ja = await pipeline._normalize_query_to_japanese(req.requirement)
+            query_ja = expand_query_for_metadata(req.requirement)
             with storage.database.session() as session:
                 product = ProductRepository(session).get_by_code(req.product)
                 vector = PGVectorRepository(session, state["llm"], config.llm.embed_model)
@@ -93,8 +94,9 @@ Metadata RAG 候选（只允许使用这些候选里的表和字段）:
 5. 必须保留用户的过滤语义：如果用户说“姓/姓名/氏名/名字”，WHERE 条件必须作用在姓名类字段上，使用 LIKE 或可参数化的前方/部分一致；不得改写成员工编号、职员编号或其他代码字段。
 6. SQL 必须是可直接执行的 Oracle SQL，不能出现 HTML 实体、反斜杠转义、Markdown、JSON 字符串转义。
 7. SQL 字符串字面量必须直接使用单引号，例如 LIKE '松下%'。
-8. 在 SQL 开头生成 1-2 行 -- 注释，说明用途和参数。
-9. 只返回 JSON，不要返回 Markdown。
+8. SQL 注释只能使用日语；禁止中文注释。SELECT 列别名原则上不要生成，必要时只能使用 ASCII 别名，禁止中文/日文别名。
+9. 在 SQL 开头生成 1-2 行 -- 注释，说明用途和参数。
+10. 只返回 JSON，不要返回 Markdown。
 """
             generated = await state["agent"].execute_task(prompt, GeneratedSQL)
             generated.sql = clean_generated_sql(generated.sql)

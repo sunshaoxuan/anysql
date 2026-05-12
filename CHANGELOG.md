@@ -2,6 +2,22 @@
 
 All notable changes to AnySQL are documented in this file.
 
+## [0.3.1] - 2026-05-12
+
+### Changed
+
+- Reduced assistant generation latency by replacing LLM-based query normalization with local Japanese metadata query expansion.
+- Skipped LLM match validation when vector retrieval has no sufficiently strong SQL candidate, so low-match generation uses one LLM call.
+- Tightened generation prompts to require Japanese SQL comments, executable Oracle SQL literals, and ASCII-only aliases when aliases are unavoidable.
+
+### Fixed
+
+- Fixed SQL viewer highlighting so single quotes are displayed as real quotes instead of HTML entities.
+- Preserved SQL comment line breaks when formatting and toggling comments in the SQL viewer.
+- Removed non-ASCII generated column aliases from SQL drafts.
+- Replaced broken LLM placeholder literals such as `LIKE '[:1]%'`, `LIKE '%%'`, and generated name parameters with the explicit value provided by the user.
+- Removed unrequested generated company/date/employee-number filters from surname/name searches.
+
 ## [0.3.0] - 2026-05-12
 
 ### Added

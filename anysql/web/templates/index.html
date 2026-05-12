@@ -96,7 +96,12 @@ function decodeHtmlEntities(text) {
 
 function formatSql(sql) {
     let text = decodeHtmlEntities(String(sql || '')).replace(/\\n/g, '\n').replace(/\\'/g, "'").replace(/\\"/g, '"');
-    text = text.replace(/\s+/g, ' ').trim();
+    const lines = text.split(/\r?\n/);
+    const comments = [];
+    while (lines.length > 0 && lines[0].trim().startsWith('--')) {
+        comments.push(lines.shift().trimEnd());
+    }
+    text = lines.join('\n').replace(/\s+/g, ' ').trim();
     if (!text) return '';
     const clauses = [
         'SELECT', 'FROM', 'WHERE', 'GROUP BY', 'HAVING', 'ORDER BY',
@@ -111,21 +116,29 @@ function formatSql(sql) {
         .replace(/\s+(AND|OR)\s+/ig, '\n  $1 ')
         .replace(/,\s*/g, ',\n  ')
         .replace(/^\n+/, '');
-    return text;
+    return [...comments, text].filter(Boolean).join('\n');
 }
 
 function highlightSql(sql) {
     const formatted = formatSql(sql);
-    const escaped = escapeHtml(formatted);
-    return escaped.replace(/('[^']*'|:[A-Za-z_][\w]*|\b[A-Za-z_][\w$#]*\b|\b\d+(?:\.\d+)?\b|[(),.;=*<>+-])/g, token => {
+    const tokenPattern = /('[^']*'|:[A-Za-z_][\w]*|\b[A-Za-z_][\w$#]*\b|\b\d+(?:\.\d+)?\b|[(),.;=*<>+-])/g;
+    let html = '';
+    let lastIndex = 0;
+    for (const match of formatted.matchAll(tokenPattern)) {
+        const token = match[0];
+        html += escapeHtml(formatted.slice(lastIndex, match.index));
         const upper = token.toUpperCase();
-        if (token.startsWith("'")) return `<span class="sql-string">${token}</span>`;
-        if (token.startsWith(':')) return `<span class="sql-param">${token}</span>`;
-        if (/^\d/.test(token)) return `<span class="sql-number">${token}</span>`;
-        if (SQL_KEYWORDS.has(upper)) return `<span class="sql-keyword">${upper}</span>`;
-        if (/^[(),.;=*<>+-]$/.test(token)) return `<span class="sql-symbol">${token}</span>`;
-        return `<span class="sql-ident">${token}</span>`;
-    });
+        const safeToken = escapeHtml(token);
+        if (token.startsWith("'")) html += `<span class="sql-string">${safeToken}</span>`;
+        else if (token.startsWith(':')) html += `<span class="sql-param">${safeToken}</span>`;
+        else if (/^\d/.test(token)) html += `<span class="sql-number">${safeToken}</span>`;
+        else if (SQL_KEYWORDS.has(upper)) html += `<span class="sql-keyword">${upper}</span>`;
+        else if (/^[(),.;=*<>+-]$/.test(token)) html += `<span class="sql-symbol">${safeToken}</span>`;
+        else html += `<span class="sql-ident">${safeToken}</span>`;
+        lastIndex = match.index + token.length;
+    }
+    html += escapeHtml(formatted.slice(lastIndex));
+    return html;
 }
 
 function visibleSql() {
