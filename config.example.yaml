@@ -21,6 +21,7 @@ server:
 
 products:
   demo:
+    physical_id: "demo-product"
     name: "Demo Product"
     description: "Example product configuration"
     rules: |

@@ -4,6 +4,8 @@ AnySQL API — 产品管理路由
 
 from __future__ import annotations
 
+from uuid import uuid4
+
 from fastapi import APIRouter, HTTPException
 
 from anysql.config import DatabaseConfig, ProductConfig, save_config
@@ -37,6 +39,8 @@ async def list_products():
 
         products.append(ProductInfo(
             id=pid,
+            physical_id=pcfg.physical_id or pid,
+            code=pid,
             name=pcfg.name,
             description=pcfg.description,
             rules=pcfg.rules,
@@ -75,6 +79,8 @@ async def get_product(product_id: str):
 
     return ProductInfo(
         id=product_id,
+        physical_id=pcfg.physical_id or product_id,
+        code=product_id,
         name=pcfg.name,
         description=pcfg.description,
         rules=pcfg.rules,
@@ -97,9 +103,21 @@ async def upsert_product(req: ProductUpsertRequest):
     """新增或更新产品配置"""
     state = _get_app_state()
     config = state["config"]
-    original_id = req.original_id or req.id
-    existing = config.products.get(original_id)
-    if original_id != req.id and original_id in config.products:
+    original_id = None
+    existing = None
+    if req.physical_id:
+        for pid, product in config.products.items():
+            if (product.physical_id or pid) == req.physical_id:
+                original_id = pid
+                existing = product
+                break
+
+    if existing is None and req.code in config.products:
+        original_id = req.code
+        existing = config.products[req.code]
+
+    physical_id = req.physical_id or (existing.physical_id if existing else "") or str(uuid4())
+    if original_id and original_id != req.code:
         config.products.pop(original_id)
         pipeline = state.get("pipeline")
         if pipeline and original_id in pipeline._progress_map:
@@ -107,7 +125,8 @@ async def upsert_product(req: ProductUpsertRequest):
     password = req.database_password
     if not password and existing:
         password = existing.database.password
-    config.products[req.id] = ProductConfig(
+    config.products[req.code] = ProductConfig(
+        physical_id=physical_id,
         name=req.name,
         description=req.description,
         rules=req.rules,
@@ -127,8 +146,8 @@ async def upsert_product(req: ProductUpsertRequest):
         from pathlib import Path
         Path(d).mkdir(parents=True, exist_ok=True)
     save_config(config)
-    logger.info(f"产品配置已更新: {original_id} -> {req.id}")
-    return await get_product(req.id)
+    logger.info(f"产品配置已更新: {original_id or req.code} -> {req.code}")
+    return await get_product(req.code)
 
 
 @router.delete("/{product_id}")

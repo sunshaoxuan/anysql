@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from typing import Optional
+from uuid import uuid4
 
 import yaml
 from pydantic import BaseModel, Field
@@ -58,6 +59,7 @@ class DatabaseConfig(BaseModel):
 
 class ProductConfig(BaseModel):
     """产品定义"""
+    physical_id: str = ""
     name: str
     description: str = ""
     rules: str = ""
@@ -138,6 +140,8 @@ def load_config(config_path: Optional[str] = None) -> AppConfig:
 
     # 确保目录存在
     for product_id, product in _config.products.items():
+        if not product.physical_id:
+            product.physical_id = str(uuid4())
         for d in [product.sql_dir, product.desc_dir, product.metadata_dir]:
             Path(d).mkdir(parents=True, exist_ok=True)
 

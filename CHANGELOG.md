@@ -2,6 +2,14 @@
 
 All notable changes to AnySQL are documented in this file.
 
+## [0.1.7] - 2026-05-12
+
+### Changed
+
+- Added immutable product `physical_id` and renamed the editable UI identifier to Code.
+- Product editing now uses `physical_id` as identity, so changing Code cannot create stale undeletable products.
+- Localized remaining Product management field labels.
+
 ## [0.1.6] - 2026-05-12
 
 ### Added

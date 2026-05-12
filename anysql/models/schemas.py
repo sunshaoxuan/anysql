@@ -203,6 +203,8 @@ class SQLAssistantResponse(BaseModel):
 class ProductInfo(BaseModel):
     """产品信息"""
     id: str
+    physical_id: str = ""
+    code: str = ""
     name: str
     description: str = ""
     rules: str = ""
@@ -221,8 +223,8 @@ class ProductInfo(BaseModel):
 
 class ProductUpsertRequest(BaseModel):
     """新增或更新产品配置"""
-    id: str = Field(pattern=r"^[A-Za-z0-9_-]+$")
-    original_id: Optional[str] = Field(default=None, pattern=r"^[A-Za-z0-9_-]+$")
+    physical_id: Optional[str] = None
+    code: str = Field(pattern=r"^[A-Za-z0-9_-]+$")
     name: str
     description: str = ""
     rules: str = ""

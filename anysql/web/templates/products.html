@@ -6,10 +6,10 @@
         <section class="products-list">
             <div class="products-head">
                 <div>
-                    <h1>Products</h1>
-                    <p>Metadata, SQL sources, and model guardrails.</p>
+                    <h1 data-i18n="productsTitle">プロダクト</h1>
+                    <p data-i18n="productsLead">Metadata、SQLソース、生成ルール</p>
                 </div>
-                <button class="btn btn-primary icon-btn" onclick="newProduct()" title="New product">
+                <button class="btn btn-primary icon-btn" onclick="newProduct()" data-i18n-title="newProduct" title="追加">
                     <i class="fas fa-plus"></i>
                 </button>
             </div>
@@ -17,29 +17,30 @@
         </section>
 
         <section class="product-editor">
-            <div class="side-label">Product</div>
+            <div class="side-label" data-i18n="productEditor">プロダクト</div>
             <form id="productForm" class="product-form">
+                <input type="hidden" name="physical_id">
                 <div class="form-grid">
-                    <label>ID<input name="id" required pattern="[A-Za-z0-9_-]+"></label>
-                    <label>Name<input name="name" required></label>
+                    <label><span data-i18n="code">コード</span><input name="code" required pattern="[A-Za-z0-9_-]+"></label>
+                    <label><span data-i18n="name">名前</span><input name="name" required></label>
                 </div>
-                <label>Description<textarea name="description" rows="2"></textarea></label>
-                <label>Rules / Prompt Guardrails<textarea name="rules" rows="8" placeholder="Undocumented product rules, naming conventions, forbidden joins, date handling, tenant filters..."></textarea></label>
+                <label><span data-i18n="description">説明</span><textarea name="description" rows="2"></textarea></label>
+                <label><span data-i18n="rules">ルール / Prompt制約</span><textarea name="rules" rows="8"></textarea></label>
                 <div class="form-grid">
-                    <label>SQL Dir<input name="sql_dir" required></label>
-                    <label>Desc Dir<input name="desc_dir" required></label>
-                    <label>Metadata Dir<input name="metadata_dir" required></label>
-                    <label>DB Type<input name="database_type" value="oracle"></label>
-                    <label>Host<input name="database_host"></label>
-                    <label>Port<input name="database_port" type="number" value="1521"></label>
-                    <label>Service<input name="database_service_name"></label>
-                    <label>User<input name="database_username"></label>
-                    <label>Password<input name="database_password" type="password"></label>
+                    <label><span data-i18n="sqlDir">SQLディレクトリ</span><input name="sql_dir" required></label>
+                    <label><span data-i18n="descDir">分析ディレクトリ</span><input name="desc_dir" required></label>
+                    <label><span data-i18n="metadataDir">Metadataディレクトリ</span><input name="metadata_dir" required></label>
+                    <label><span data-i18n="dbType">DB種別</span><input name="database_type" value="oracle"></label>
+                    <label><span data-i18n="host">ホスト</span><input name="database_host"></label>
+                    <label><span data-i18n="port">ポート</span><input name="database_port" type="number" value="1521"></label>
+                    <label><span data-i18n="service">サービス</span><input name="database_service_name"></label>
+                    <label><span data-i18n="user">ユーザー</span><input name="database_username"></label>
+                    <label><span data-i18n="password">パスワード</span><input name="database_password" type="password"></label>
                 </div>
                 <div class="editor-actions">
-                    <button type="submit" class="btn btn-primary icon-btn" title="Save"><i class="fas fa-floppy-disk"></i></button>
-                    <button type="button" class="btn btn-outline icon-btn danger-btn" onclick="deleteCurrentProduct()" title="Delete"><i class="fas fa-trash"></i></button>
-                    <button type="button" class="btn btn-outline icon-btn" onclick="newProduct()" title="Clear"><i class="fas fa-eraser"></i></button>
+                    <button type="submit" class="btn btn-primary icon-btn" data-i18n-title="save" title="保存"><i class="fas fa-floppy-disk"></i></button>
+                    <button type="button" class="btn btn-outline icon-btn danger-btn" onclick="deleteCurrentProduct()" data-i18n-title="delete" title="削除"><i class="fas fa-trash"></i></button>
+                    <button type="button" class="btn btn-outline icon-btn" onclick="newProduct()" data-i18n-title="clear" title="クリア"><i class="fas fa-eraser"></i></button>
                 </div>
             </form>
         </section>
@@ -50,12 +51,13 @@
 {% block scripts %}
 <script>
 let products = [];
-let editingProductId = null;
+let editingPhysicalId = null;
 
 function fillForm(product = {}) {
     const form = document.getElementById('productForm');
     const defaults = {
-        id: '',
+        physical_id: '',
+        code: '',
         name: '',
         description: '',
         rules: '',
@@ -74,7 +76,7 @@ function fillForm(product = {}) {
         const el = form.elements[key];
         if (el) el.value = value ?? '';
     }
-    editingProductId = product.id || null;
+    editingPhysicalId = product.physical_id || null;
 }
 
 function newProduct() {
@@ -85,16 +87,16 @@ function newProduct() {
 function renderProducts() {
     const list = document.getElementById('productCards');
     list.innerHTML = products.map(p => `
-        <button class="product-card" onclick="editProduct('${p.id}')">
+        <button class="product-card" onclick="editProduct('${p.physical_id || p.id}')">
             <span><i class="fas fa-database"></i></span>
             <strong>${escapeHtml(p.name)}</strong>
-            <small>${escapeHtml(p.id)} / ${p.sql_count || 0} SQL</small>
+            <small>${escapeHtml(p.code || p.id)} / ${p.sql_count || 0} SQL</small>
         </button>
     `).join('');
 }
 
-function editProduct(id) {
-    const p = products.find(item => item.id === id);
+function editProduct(physicalId) {
+    const p = products.find(item => (item.physical_id || item.id) === physicalId);
     if (!p) return;
     fillForm({
         ...p,
@@ -117,7 +119,7 @@ document.getElementById('productForm').addEventListener('submit', async (event) 
     event.preventDefault();
     const form = event.currentTarget;
     const payload = Object.fromEntries(new FormData(form).entries());
-    payload.original_id = editingProductId || payload.id;
+    payload.physical_id = editingPhysicalId || payload.physical_id || null;
     payload.database_port = Number(payload.database_port || 1521);
     const res = await fetch('/api/products', {
         method: 'POST',
@@ -132,15 +134,15 @@ document.getElementById('productForm').addEventListener('submit', async (event) 
 });
 
 async function deleteCurrentProduct() {
-    const id = editingProductId || document.getElementById('productForm').elements.id.value;
-    if (!id) return;
-    if (!confirm(`Delete product configuration: ${id}?`)) return;
-    const res = await fetch(`/api/products/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    const code = document.getElementById('productForm').elements.code.value;
+    if (!code) return;
+    if (!confirm(`Delete product configuration: ${code}?`)) return;
+    const res = await fetch(`/api/products/${encodeURIComponent(code)}`, { method: 'DELETE' });
     if (!res.ok) {
         alert(await res.text());
         return;
     }
-    editingProductId = null;
+    editingPhysicalId = null;
     await loadProducts();
     if (!products.length) newProduct();
 }
