@@ -300,6 +300,13 @@ document.getElementById('assistantForm').addEventListener('submit', async (event
     await sendMessage(text);
 });
 
+document.getElementById('messageInput').addEventListener('keydown', async (event) => {
+    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+        event.preventDefault();
+        document.getElementById('assistantForm').requestSubmit();
+    }
+});
+
 document.getElementById('productSelect').addEventListener('change', () => {
     resetCurrentSql();
 });
