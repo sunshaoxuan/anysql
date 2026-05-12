@@ -136,6 +136,37 @@ class SearchResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# SQL 生成与知识沉淀模型
+# ---------------------------------------------------------------------------
+
+class SQLGenerationRequest(BaseModel):
+    """基于产品知识生成 SQL 的请求"""
+    product: str = Field(description="目标产品ID")
+    requirement: str = Field(description="自然语言业务需求")
+    top_k: int = Field(default=5, ge=1, le=20, description="参考相似SQL数量")
+
+
+class GeneratedSQL(BaseModel):
+    """LLM 生成的 SQL 及解释"""
+    sql: str = Field(description="可执行或可改造的SQL")
+    summary: str = Field(description="SQL用途总结")
+    business_meaning: str = Field(default="", description="业务含义")
+    usage_guide: str = Field(default="", description="参数替换和使用方法")
+    parameters: list[str] = Field(default_factory=list, description="参数说明")
+    tables: list[str] = Field(default_factory=list, description="涉及表名")
+    assumptions: list[str] = Field(default_factory=list, description="生成时的假设")
+
+
+class SQLGenerationResponse(BaseModel):
+    """SQL 生成响应，同时返回自动沉淀后的记录"""
+    product: str
+    requirement: str
+    generated: GeneratedSQL
+    record: SQLRecord
+    learned: bool = True
+
+
+# ---------------------------------------------------------------------------
 # 产品与分析状态模型
 # ---------------------------------------------------------------------------
 

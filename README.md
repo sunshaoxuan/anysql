@@ -8,6 +8,8 @@ AnySQL is a FastAPI-based platform for analyzing SQL assets with an LLM, indexin
 - LLM-assisted SQL summaries, usage guidance, categories, keywords, and business context.
 - Metadata-aware analysis using local database metadata snapshots.
 - ChromaDB semantic search with Ollama-compatible embeddings.
+- SQL generation from product metadata and existing SQL knowledge.
+- Automatic knowledge growth: generated SQL is analyzed, persisted, and indexed without an extra manual registration step.
 - Web UI for search, product status, and analysis progress.
 - UTF-8 first handling for Chinese, Japanese, and English SQL assets.
 
@@ -62,6 +64,21 @@ Then open:
 - `GET /api/analysis/{product}/progress`
 - `GET /api/search?q={query}&product={product}&k={top_k}`
 - `POST /api/search`
+- `POST /api/generate/sql`
+
+### Generate SQL and Learn
+
+`POST /api/generate/sql` accepts a product and natural-language requirement. The service retrieves similar SQL knowledge, injects product metadata context, generates SQL, analyzes the generated SQL, saves it into the local product SQL/description store, and updates the vector index.
+
+Example:
+
+```json
+{
+  "product": "demo",
+  "requirement": "Find employees transferred after a target date",
+  "top_k": 5
+}
+```
 
 ## Product Layout
 

@@ -2,6 +2,15 @@
 
 All notable changes to AnySQL are documented in this file.
 
+## [0.1.2] - 2026-05-12
+
+### Added
+
+- Added SQL generation request/response models.
+- Added `POST /api/generate/sql` for generating SQL from product metadata and existing SQL knowledge.
+- Added automatic knowledge growth for generated SQL: append to local product SQL store, analyze, persist description JSON, and update the vector index.
+- Documented the generate-and-learn workflow in `README.md`.
+
 ## [0.1.1] - 2026-05-12
 
 ### Added

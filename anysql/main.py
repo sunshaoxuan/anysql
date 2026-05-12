@@ -12,6 +12,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from anysql import __version__
 from anysql.config import load_config
 from anysql.core.agent_engine import AgentEngine
 from anysql.core.llm_client import LLMClient
@@ -54,7 +55,7 @@ async def lifespan(app: FastAPI):
     await llm.close()
     logger.info("=== AnySQL 正在关闭... ===")
 
-app = FastAPI(title="AnySQL", lifespan=lifespan)
+app = FastAPI(title="AnySQL", version=__version__, lifespan=lifespan)
 
 # 挂载静态资源和模板
 app.mount("/static", StaticFiles(directory=BASE_DIR / "web" / "static"), name="static")
@@ -62,9 +63,11 @@ templates = Jinja2Templates(directory=BASE_DIR / "web" / "templates")
 
 # 包含 API 路由
 from anysql.api.analysis import router as analysis_router
+from anysql.api.generation import router as generation_router
 from anysql.api.products import router as products_router
 from anysql.api.search import router as search_router
 app.include_router(analysis_router)
+app.include_router(generation_router)
 app.include_router(products_router)
 app.include_router(search_router)
 

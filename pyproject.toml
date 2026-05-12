@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "anysql"
-version = "0.1.1"
+version = "0.1.2"
 description = "AI-assisted SQL asset analysis and natural-language search platform."
 readme = "README.md"
 requires-python = ">=3.11"
