@@ -233,6 +233,58 @@ class PGVectorRepository:
             })
         return results
 
+    def search_metadata_by_intent(self, requirement: str, product_id: str, top_k: int = 8) -> list[dict]:
+        intent = _metadata_intent(requirement)
+        if intent != "employee_basic_name":
+            return []
+        rows = self.session.execute(text("""
+            SELECT mt.id, mt.table_name, mt.comment,
+                   BOOL_OR(mc.column_name ~* '(C?NAME|KANJI|KANA|MEI|SHIMEI|SIMEI)'
+                           OR COALESCE(mc.comment, '') LIKE '%氏名%') AS has_name,
+                   BOOL_OR(mc.column_name ~* '(SHAIN|EMPLOYEE|CEMPLOYEE)'
+                           OR COALESCE(mc.comment, '') LIKE '%職員番号%'
+                           OR COALESCE(mc.comment, '') LIKE '%社員番号%') AS has_employee_no,
+                   STRING_AGG(
+                       DISTINCT CASE
+                           WHEN mc.column_name ~* '(C?NAME|KANJI|KANA|MEI|SHIMEI|SIMEI|SHAIN|EMPLOYEE|CEMPLOYEE)'
+                                OR COALESCE(mc.comment, '') LIKE '%氏名%'
+                                OR COALESCE(mc.comment, '') LIKE '%職員番号%'
+                                OR COALESCE(mc.comment, '') LIKE '%社員番号%'
+                           THEN mc.column_name || ':' || COALESCE(mc.comment, '')
+                           ELSE NULL
+                       END,
+                       E'\n'
+                   ) AS matched_columns
+            FROM metadata_tables mt
+            JOIN metadata_columns mc ON mc.metadata_table_id = mt.id
+            WHERE mt.product_id = :product_id
+            GROUP BY mt.id, mt.table_name, mt.comment
+            HAVING BOOL_OR(mc.column_name ~* '(C?NAME|KANJI|KANA|MEI|SHIMEI|SIMEI)'
+                           OR COALESCE(mc.comment, '') LIKE '%氏名%')
+               AND BOOL_OR(mc.column_name ~* '(SHAIN|EMPLOYEE|CEMPLOYEE)'
+                           OR COALESCE(mc.comment, '') LIKE '%職員番号%'
+                           OR COALESCE(mc.comment, '') LIKE '%社員番号%')
+        """), {"product_id": product_id}).mappings().all()
+        scored: list[dict] = []
+        for row in rows:
+            table_name = str(row["table_name"] or "")
+            comment = str(row["comment"] or "")
+            score = _employee_basic_table_score(table_name, comment)
+            if score <= 0:
+                continue
+            table = self.session.get(MetadataTable, row["id"])
+            document = self._metadata_doc(table) if table else f"Table: {table_name}\nComment: {comment}"
+            if row["matched_columns"]:
+                document = f"{document}\nIntent matched columns:\n{row['matched_columns']}"
+            scored.append({
+                "id": table_name,
+                "table": table_name,
+                "score": round(min(0.98, score), 4),
+                "document": document,
+                "source": "intent_rerank",
+            })
+        return sorted(scored, key=lambda item: (-float(item["score"]), str(item["table"])))[:top_k]
+
 
 def _tokenize_query(query: str) -> list[str]:
     synonyms = {
@@ -253,3 +305,56 @@ def _tokenize_query(query: str) -> list[str]:
             if key in token:
                 expanded.extend(values)
     return expanded
+
+
+def _metadata_intent(requirement: str) -> str:
+    text_value = requirement or ""
+    asks_basic = any(word in text_value for word in ("基本情况", "基本信息", "基本資料", "基本情報"))
+    asks_employee = any(word in text_value for word in ("员工", "职员", "職員", "社員", "人的", "人の"))
+    asks_name = any(word in text_value for word in ("姓", "姓名", "名字", "氏名"))
+    if asks_basic and asks_employee and asks_name:
+        return "employee_basic_name"
+    return ""
+
+
+def _employee_basic_table_score(table_name: str, comment: str) -> float:
+    table = table_name.upper()
+    text_value = f"{table_name} {comment}"
+    score = 0.55
+    if "個人基本情報DB" in text_value:
+        score += 0.42
+    elif "個人基本情報" in text_value:
+        score += 0.36
+    elif "基本情報" in text_value:
+        score += 0.24
+    if "DB" in comment:
+        score += 0.04
+    if table in {"DJND0110", "MAST_EMPLOYEES", "MAST_EMPLOYEES2"}:
+        score += 0.05
+    penalties = {
+        "IF": 0.24,
+        "DT_": 0.22,
+        "_IDO": 0.2,
+        "_KAK": 0.2,
+        "ワーク": 0.24,
+        "WORK": 0.24,
+        "WK": 0.18,
+        "WPT": 0.18,
+        "入力": 0.16,
+        "連携": 0.16,
+        "履歴": 0.16,
+        "ログ": 0.16,
+        "バックアップ": 0.16,
+        "非常勤": 0.16,
+        "翌月": 0.14,
+        "給与": 0.12,
+        "財形": 0.18,
+        "賞与": 0.12,
+        "年末": 0.12,
+        "_R": 0.12,
+        "DEL": 0.12,
+    }
+    for marker, penalty in penalties.items():
+        if marker in text_value.upper() if marker.isascii() else marker in text_value:
+            score -= penalty
+    return score

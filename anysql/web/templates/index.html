@@ -38,6 +38,10 @@
                         <input type="checkbox" id="includeComments" checked>
                         <span data-i18n="includeComments">注釈を含める</span>
                     </label>
+                    <label class="comment-toggle">
+                        <input type="checkbox" id="useAliases">
+                        <span data-i18n="useAliases">別名を使う</span>
+                    </label>
                     <button type="button" class="btn btn-outline icon-btn" onclick="copyCurrentSql(this)" title="Copy">
                         <i class="far fa-copy"></i>
                     </button>
@@ -287,7 +291,8 @@ async function sendMessage(text) {
         current_sql_id: currentSqlId,
         current_sql: currentSql,
         top_k: 5,
-        match_threshold: 0.78
+        match_threshold: 0.78,
+        use_aliases: document.getElementById('useAliases').checked
     };
 
     const res = await fetch('/api/assistant/sql', {

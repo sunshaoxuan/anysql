@@ -8,7 +8,19 @@ def test_clean_generated_sql_decodes_entities_and_removes_escaped_quotes():
 
 def test_clean_generated_sql_removes_non_ascii_column_aliases():
     sql = "SELECT ME_CEMPLOYEEID_CK AS 社员番号, ME_CKANJINAME AS kanji_name FROM MAST_EMPLOYEES"
-    assert clean_generated_sql(sql) == "SELECT ME_CEMPLOYEEID_CK, ME_CKANJINAME AS kanji_name FROM MAST_EMPLOYEES;"
+    assert clean_generated_sql(sql) == "SELECT ME_CEMPLOYEEID_CK, ME_CKANJINAME FROM MAST_EMPLOYEES;"
+
+
+def test_clean_generated_sql_keeps_ascii_aliases_when_enabled():
+    sql = "SELECT ME_CEMPLOYEEID_CK AS emp_no, ME_CKANJINAME AS kanji_name FROM MAST_EMPLOYEES"
+    assert clean_generated_sql(sql, allow_aliases=True) == (
+        "SELECT ME_CEMPLOYEEID_CK AS emp_no, ME_CKANJINAME AS kanji_name FROM MAST_EMPLOYEES;"
+    )
+
+
+def test_clean_generated_sql_removes_implicit_non_ascii_column_aliases():
+    sql = "SELECT CSHAINNO 職員番号,\n       CNAMEKNJ 漢字氏名\nFROM DJND0110"
+    assert clean_generated_sql(sql) == "SELECT CSHAINNO,\n       CNAMEKNJ\nFROM DJND0110;"
 
 
 def test_add_sql_header_comment_uses_japanese_multiline_template():
@@ -78,4 +90,28 @@ WHERE x.CSHAINNO LIKE '123456%'
   OR w.CNAMEKNJ LIKE '丰田%'"""
     assert preserve_requirement_literal(sql, "查一下所有姓“丰田”的员工") == (
         "SELECT x.CSHAINNO, w.CNAMEKNJ\nFROM XKYTSIKYU x\nJOIN WPT_DJNP54106M_01 w ON x.CSHAINNO = w.CSHAINNO\nWHERE w.CNAMEKNJ LIKE '丰田%';"
+    )
+
+
+def test_preserve_requirement_literal_removes_trailing_employee_number_filter():
+    sql = """SELECT CSHAINNO, CNAMEKNJ, CNAMEKNA
+FROM XKYYTKIHON_R
+WHERE (CNAMEKNJ LIKE '丰田%' OR CNAMEKNA LIKE '丰田%')
+  AND CSHAINNO = '123456'"""
+    assert preserve_requirement_literal(sql, "查出所有姓“丰田”的人的基本信息") == (
+        "SELECT CSHAINNO, CNAMEKNJ, CNAMEKNA\nFROM XKYYTKIHON_R\nWHERE (CNAMEKNJ LIKE '丰田%' OR CNAMEKNA LIKE '丰田%');"
+    )
+
+
+def test_preserve_requirement_literal_replaces_quoted_name_parameter_pattern():
+    sql = "SELECT CSHAINNO, CNAMEKNJ FROM DJND0110 WHERE CNAMEKNJ LIKE '':name_pattern'%'"
+    assert preserve_requirement_literal(sql, "查出所有姓“丰田”的人的基本信息") == (
+        "SELECT CSHAINNO, CNAMEKNJ FROM DJND0110 WHERE CNAMEKNJ LIKE '丰田%';"
+    )
+
+
+def test_preserve_requirement_literal_replaces_bare_name_parameter():
+    sql = "SELECT CSHAINNO, CNAMEKNJ FROM DJND0110 WHERE CNAMEKNJ LIKE :name_pattern"
+    assert preserve_requirement_literal(sql, "查出所有姓“丰田”的人的基本信息") == (
+        "SELECT CSHAINNO, CNAMEKNJ FROM DJND0110 WHERE CNAMEKNJ LIKE '丰田%';"
     )

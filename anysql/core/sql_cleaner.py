@@ -21,21 +21,21 @@ def decode_html_entities(value: str) -> str:
     return text
 
 
-def clean_generated_sql(sql: str) -> str:
+def clean_generated_sql(sql: str, allow_aliases: bool = False) -> str:
     text = decode_html_entities(sql)
     text = _FENCE_RE.sub("", text).strip()
     text = text.replace("\\n", "\n").replace("\\t", "\t")
     text = text.replace('\\"', '"').replace("\\'", "'")
     text = text.replace("&#39;", "'").replace("&quot;", '"')
     text = re.sub(r"^\s*(SQL|sql)\s*:\s*", "", text).strip()
-    text = _remove_non_ascii_column_aliases(text)
+    text = _normalize_column_aliases(text, allow_aliases=allow_aliases)
     text = text.rstrip().rstrip(";")
     return f"{text};" if text else ""
 
 
-def preserve_requirement_literal(sql: str, requirement: str) -> str:
+def preserve_requirement_literal(sql: str, requirement: str, allow_aliases: bool = False) -> str:
     """Replace broken placeholder literals with the quoted value from the request."""
-    text = clean_generated_sql(sql)
+    text = clean_generated_sql(sql, allow_aliases=allow_aliases)
     values = re.findall(r"[\"“”'‘’]([^\"“”'‘’]{1,40})[\"“”'‘’]", str(requirement or ""))
     value = next((item.strip() for item in values if item.strip()), "")
     if not value:
@@ -60,7 +60,19 @@ def preserve_requirement_literal(sql: str, requirement: str) -> str:
         flags=re.IGNORECASE,
     )
     text = re.sub(
+        r"LIKE\s+:[A-Za-z_]*(?:name|mei|shimei)[A-Za-z0-9_]*",
+        f"LIKE '{escaped}%'",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
         r"LIKE\s+'\$_[A-Za-z0-9_]*(?:NAME|MEI|SHIMEI)[A-Za-z0-9_]*%'",
+        f"LIKE '{escaped}%'",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        r"LIKE\s+''?:[A-Za-z_]*(?:name|mei|shimei)[A-Za-z0-9_]*'?'?%?'?",
         f"LIKE '{escaped}%'",
         text,
         flags=re.IGNORECASE,
@@ -97,6 +109,12 @@ def preserve_requirement_literal(sql: str, requirement: str) -> str:
             text,
             flags=re.IGNORECASE,
         )
+        text = re.sub(
+            r"\n\s+(?:AND|OR)\s+[\w.]*?(?:SHAIN|EMPLOYEE|CEMPLOYEE|NO|ID)[\w.]*\s*=\s*'[^']*'",
+            "",
+            text,
+            flags=re.IGNORECASE,
+        )
         text = re.sub(r"\n\s+(?:AND|OR)\s+[^\n;]*\$_PARAM_(?!NAME|MEI|SHIMEI)[^\n;]*", "", text, flags=re.IGNORECASE)
     return f"{text.rstrip().rstrip(';')};" if text else ""
 
@@ -108,15 +126,15 @@ def strip_sql_comments(sql: str) -> str:
     return "\n".join(line for line in lines if line.strip())
 
 
-def format_sql(sql: str) -> str:
-    text = clean_generated_sql(sql)
+def format_sql(sql: str, allow_aliases: bool = False) -> str:
+    text = clean_generated_sql(sql, allow_aliases=allow_aliases)
     if not text:
         return ""
     return sqlparse.format(text, keyword_case="upper", reindent=True, strip_comments=False).strip()
 
 
-def add_sql_header_comment(sql: str, summary: str, requirement: str) -> str:
-    body = format_sql(strip_sql_comments(sql))
+def add_sql_header_comment(sql: str, summary: str, requirement: str, allow_aliases: bool = False) -> str:
+    body = format_sql(strip_sql_comments(sql), allow_aliases=allow_aliases)
     if not body:
         return ""
     return "\n".join(
@@ -128,11 +146,22 @@ def add_sql_header_comment(sql: str, summary: str, requirement: str) -> str:
     )
 
 
-def _remove_non_ascii_column_aliases(sql: str) -> str:
+def _normalize_column_aliases(sql: str, allow_aliases: bool = False) -> str:
     def replace_alias(match: re.Match[str]) -> str:
         alias = match.group(1).strip().strip('"')
+        if not allow_aliases:
+            return ""
         if all(ch.isascii() and (ch.isalnum() or ch in "_$#") for ch in alias):
             return match.group(0)
         return ""
 
-    return re.sub(r"\s+AS\s+(\"[^\"]+\"|[^\s,;]+)", replace_alias, sql, flags=re.IGNORECASE)
+    text = re.sub(r"\s+AS\s+(\"[^\"]+\"|[^\s,;]+)", replace_alias, sql, flags=re.IGNORECASE)
+    alias_keywords = {"LIKE", "FROM", "WHERE", "AND", "OR", "ON", "JOIN", "ORDER", "GROUP", "BY"}
+    return re.sub(
+        r"(\b[A-Za-z_][A-Za-z0-9_.$#]*\b)\s+(\"[^\"]+\"|[^\s,;]+)(?=\s*(?:,|\nFROM\b|\r?\n))",
+        lambda match: match.group(0)
+        if match.group(1).upper() in alias_keywords or match.group(2).startswith("'") or match.group(2).strip().strip('"').isascii()
+        else match.group(1),
+        text,
+        flags=re.IGNORECASE,
+    )

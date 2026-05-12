@@ -2,6 +2,23 @@
 
 All notable changes to AnySQL are documented in this file.
 
+## [0.3.3] - 2026-05-13
+
+### Added
+
+- Added a SQL alias toggle in the assistant UI, defaulting to off.
+- Added `use_aliases` to assistant requests so generation can explicitly allow or suppress column aliases.
+
+### Changed
+
+- Default SQL cleanup now removes generated column aliases, including `AS alias` aliases and non-ASCII implicit aliases.
+- Employee basic-information metadata retrieval now applies a non-LLM intent reranker so personal master tables rank above payroll, work, history, IF, and backup tables.
+
+### Fixed
+
+- Fixed quoted name-parameter patterns such as `LIKE '':name_pattern'%` by replacing them with the user's actual surname literal.
+- Removed trailing employee-number filters from surname/name searches.
+
 ## [0.3.2] - 2026-05-12
 
 ### Fixed

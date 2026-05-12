@@ -103,9 +103,9 @@ JSONだけ返してください: {{"query_ja": "..."}}
             return text
 
     @staticmethod
-    def _draft_record(product_id: str, requirement: str, generated: GeneratedSQL) -> SQLRecord:
-        executable_sql = preserve_requirement_literal(generated.sql, requirement)
-        display_sql = add_sql_header_comment(executable_sql, generated.summary, requirement)
+    def _draft_record(product_id: str, requirement: str, generated: GeneratedSQL, allow_aliases: bool = False) -> SQLRecord:
+        executable_sql = preserve_requirement_literal(generated.sql, requirement, allow_aliases=allow_aliases)
+        display_sql = add_sql_header_comment(executable_sql, generated.summary, requirement, allow_aliases=allow_aliases)
         tables = [t.upper() for t in generated.tables] or _extract_tables(executable_sql)
         stmt = SQLStatement(
             id=f"{product_id}_draft_{datetime.now().strftime('%Y%m%d%H%M%S')}",

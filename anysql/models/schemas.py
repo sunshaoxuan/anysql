@@ -183,6 +183,7 @@ class SQLAssistantRequest(BaseModel):
     current_sql: Optional[str] = Field(default=None, description="当前正在修正的SQL文本")
     top_k: int = Field(default=5, ge=1, le=20)
     match_threshold: float = Field(default=0.78, ge=0, le=1)
+    use_aliases: bool = Field(default=False, description="是否允许生成列别名")
 
 
 class SQLAssistantResponse(BaseModel):

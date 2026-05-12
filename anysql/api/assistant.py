@@ -52,7 +52,11 @@ async def assist_sql(req: SQLAssistantRequest):
                     product = ProductRepository(search_session).get_by_code(req.product)
                     vector = PGVectorRepository(search_session, state["llm"], config.llm.embed_model)
                     metadata_hits = await vector.search_metadata(query_ja, product.id, 10)
-                    metadata_hits = _merge_metadata_hits(metadata_hits, vector.search_metadata_text(f"{req.message} {query_ja}", product.id, 10))
+                    metadata_hits = _merge_metadata_hits(
+                        metadata_hits,
+                        vector.search_metadata_text(f"{req.message} {query_ja}", product.id, 10),
+                        vector.search_metadata_by_intent(req.message, product.id, 8),
+                    )
                 generated = await _generate_sql_from_context(
                     state,
                     config,
@@ -62,9 +66,10 @@ async def assist_sql(req: SQLAssistantRequest):
                     metadata_hits,
                     [],
                     current_sql=current_sql,
+                    allow_aliases=req.use_aliases,
                 )
-                generated.sql = clean_generated_sql(generated.sql)
-                record = pipeline._draft_record(req.product, req.message, generated)
+                generated.sql = clean_generated_sql(generated.sql, allow_aliases=req.use_aliases)
+                record = pipeline._draft_record(req.product, req.message, generated, allow_aliases=req.use_aliases)
                 mode, matches, learned = "revised", [], False
             else:
                 query_ja = expand_query_for_metadata(req.message)
@@ -73,7 +78,11 @@ async def assist_sql(req: SQLAssistantRequest):
                     vector = PGVectorRepository(search_session, state["llm"], config.llm.embed_model)
                     candidates = await vector.search(query_ja, req.product, req.top_k)
                     metadata_hits = await vector.search_metadata(query_ja, product.id, 8)
-                    metadata_hits = _merge_metadata_hits(metadata_hits, vector.search_metadata_text(f"{req.message} {query_ja}", product.id, 10))
+                    metadata_hits = _merge_metadata_hits(
+                        metadata_hits,
+                        vector.search_metadata_text(f"{req.message} {query_ja}", product.id, 10),
+                        vector.search_metadata_by_intent(req.message, product.id, 8),
+                    )
                 top_vector_score = max((item.score for item in candidates), default=0.0)
                 matches = []
                 if top_vector_score >= max(0.68, req.match_threshold - 0.08):
@@ -98,9 +107,10 @@ async def assist_sql(req: SQLAssistantRequest):
                         query_ja,
                         metadata_hits,
                         relevant_candidates,
+                        allow_aliases=req.use_aliases,
                     )
-                    generated.sql = clean_generated_sql(generated.sql)
-                    record = pipeline._draft_record(req.product, req.message, generated)
+                    generated.sql = clean_generated_sql(generated.sql, allow_aliases=req.use_aliases)
+                    record = pipeline._draft_record(req.product, req.message, generated, allow_aliases=req.use_aliases)
                     mode, learned = "generated", False
             with storage.database.session() as session:
                 product = ProductRepository(session).get_by_code(req.product)
@@ -207,10 +217,10 @@ async def learn_sql(req: SQLLearnRequest):
     return {"status": "learned", "record": record.model_dump(mode="json")}
 
 
-def _merge_metadata_hits(primary: list[dict], secondary: list[dict]) -> list[dict]:
+def _merge_metadata_hits(primary: list[dict], secondary: list[dict], intent: list[dict] | None = None) -> list[dict]:
     merged: list[dict] = []
     seen: set[str] = set()
-    for item in [*secondary, *primary]:
+    for item in [*(intent or []), *secondary, *primary]:
         table = str(item.get("table") or item.get("id") or "").upper()
         if table and table not in seen:
             seen.add(table)
@@ -227,6 +237,7 @@ async def _generate_sql_from_context(
     metadata_hits: list[dict],
     candidates,
     current_sql: str | None = None,
+    allow_aliases: bool = False,
 ) -> GeneratedSQL:
     examples = [
         f"- {item.summary}\n  SQL: {item.raw_sql}\n  Context: {' / '.join(item.business_context)}"
@@ -239,6 +250,7 @@ async def _generate_sql_from_context(
     ) or "No metadata hits."
     allowed_tables = ", ".join(dict.fromkeys(str(m.get("table", "")).upper() for m in metadata_hits if m.get("table"))) or "No allowed tables."
     domain_hint = _domain_hint(requirement)
+    alias_rule = "SELECT 列别名不要生成。" if not allow_aliases else "SELECT 列别名如确实需要只能使用 ASCII，禁止中文/日文别名。"
     revise_block = f"\n当前 SQL（只能作为上一轮错误草稿参考，不得盲目保留错误表名）:\n{current_sql}\n" if current_sql else ""
     prompt = f"""你要为产品 {product_code} 生成或修正一段满足业务需求的 Oracle SQL。
 
@@ -271,7 +283,7 @@ async def _generate_sql_from_context(
 5. 必须保留用户的过滤语义：如果用户说“姓/姓名/氏名/名字”，WHERE 条件必须作用在姓名类字段上，使用 LIKE 或可参数化的前方/部分一致；不得改写成员工编号、职员编号或其他代码字段。
 6. SQL 必须是可直接执行的 Oracle SQL，不能出现 HTML 实体、反斜杠转义、Markdown、JSON 字符串转义。
 7. SQL 字符串字面量必须直接使用单引号，并保留用户输入的实际值；不要照抄示例值。
-8. SQL 注释只能使用日语；禁止中文注释。SELECT 列别名原则上不要生成，必要时只能使用 ASCII 别名，禁止中文/日文别名。
+8. SQL 注释只能使用日语；禁止中文注释。{alias_rule}
 9. 在 SQL 开头生成 1-2 行 -- 注释，说明用途和参数。
 10. 输出 JSON，字段必须符合 GeneratedSQL schema。
 """

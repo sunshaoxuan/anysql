@@ -51,7 +51,11 @@ async def generate_sql(req: SQLGenerationRequest):
                 vector = PGVectorRepository(session, state["llm"], config.llm.embed_model)
                 candidates = await vector.search(query_ja, req.product, req.top_k)
                 metadata_hits = await vector.search_metadata(query_ja, product.id, 8)
-                metadata_hits = _merge_metadata_hits(metadata_hits, vector.search_metadata_text(f"{req.requirement} {query_ja}", product.id, 10))
+                metadata_hits = _merge_metadata_hits(
+                    metadata_hits,
+                    vector.search_metadata_text(f"{req.requirement} {query_ja}", product.id, 10),
+                    vector.search_metadata_by_intent(req.requirement, product.id, 8),
+                )
             examples = [
                 f"- {item.summary}\n  SQL: {item.raw_sql}\n  Context: {' / '.join(item.business_context)}"
                 for item in candidates
@@ -94,13 +98,13 @@ Metadata RAG 候选（只允许使用这些候选里的表和字段）:
 5. 必须保留用户的过滤语义：如果用户说“姓/姓名/氏名/名字”，WHERE 条件必须作用在姓名类字段上，使用 LIKE 或可参数化的前方/部分一致；不得改写成员工编号、职员编号或其他代码字段。
 6. SQL 必须是可直接执行的 Oracle SQL，不能出现 HTML 实体、反斜杠转义、Markdown、JSON 字符串转义。
 7. SQL 字符串字面量必须直接使用单引号，并保留用户输入的实际值；不要照抄示例值。
-8. SQL 注释只能使用日语；禁止中文注释。SELECT 列别名原则上不要生成，必要时只能使用 ASCII 别名，禁止中文/日文别名。
+8. SQL 注释只能使用日语；禁止中文注释。SELECT 列别名不要生成。
 9. 在 SQL 开头生成 1-2 行 -- 注释，说明用途和参数。
 10. 只返回 JSON，不要返回 Markdown。
 """
             generated = await state["agent"].execute_task(prompt, GeneratedSQL)
-            generated.sql = clean_generated_sql(generated.sql)
-            record = pipeline._draft_record(req.product, req.requirement, generated)
+            generated.sql = clean_generated_sql(generated.sql, allow_aliases=False)
+            record = pipeline._draft_record(req.product, req.requirement, generated, allow_aliases=False)
         else:
             record = await pipeline.generate_and_learn(
                 product_id=req.product,
@@ -134,10 +138,10 @@ Metadata RAG 候选（只允许使用这些候选里的表和字段）:
     )
 
 
-def _merge_metadata_hits(primary: list[dict], secondary: list[dict]) -> list[dict]:
+def _merge_metadata_hits(primary: list[dict], secondary: list[dict], intent: list[dict] | None = None) -> list[dict]:
     merged: list[dict] = []
     seen: set[str] = set()
-    for item in [*secondary, *primary]:
+    for item in [*(intent or []), *secondary, *primary]:
         table = str(item.get("table") or item.get("id") or "").upper()
         if table and table not in seen:
             seen.add(table)
