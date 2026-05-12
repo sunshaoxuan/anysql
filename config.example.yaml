@@ -4,7 +4,7 @@
 # ============================================================
 
 llm:
-  base_url: "http://localhost:11434"
+  base_url: "http://ccnode.briconbric.com:22545"
   chat_model: "qwen3:14b"
   embed_model: "bge-m3"
   timeout: 120
@@ -23,13 +23,11 @@ vector_db:
   url:
 
 storage:
-  # local is for development only. Use postgresql for shared deployments.
-  backend: "local"
+  backend: "postgresql"
   database_url: "postgresql+psycopg://anysql:change-me@postgres:5432/anysql"
 
 queue:
-  # in_process is for development only. Use redis for shared deployments.
-  backend: "in_process"
+  backend: "redis"
   redis_url: "redis://redis:6379/0"
 
 server:

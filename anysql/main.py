@@ -20,6 +20,7 @@ from anysql.core.llm_client import LLMClient
 from anysql.core.vector_engine import VectorEngine
 from anysql.harness.pipeline import AnalysisPipeline
 from anysql.logger import logger
+from anysql.storage.app import StorageContext
 
 # 全局应用状态
 app_state = {}
@@ -43,6 +44,7 @@ async def lifespan(app: FastAPI):
     logger.info("=== AnySQL 启动中... ===")
     config = load_config()
     app_state["config"] = config
+    storage = StorageContext(config)
     
     llm = LLMClient(
         base_url=config.llm.base_url,
@@ -52,11 +54,12 @@ async def lifespan(app: FastAPI):
         max_retries=config.llm.max_retries,
         temperature=config.llm.temperature,
     )
+    vector_backend = "chroma" if storage.is_database_mode else config.vector_db.backend
     vector = VectorEngine(
         config.vector_db.persist_dir,
         config.vector_db.collection_prefix,
         llm,
-        backend=config.vector_db.backend,
+        backend=vector_backend,
         host=config.vector_db.host,
         port=config.vector_db.port,
     )
@@ -68,7 +71,8 @@ async def lifespan(app: FastAPI):
         "vector": vector,
         "agent": agent,
         "pipeline": pipeline,
-        "metadata_sync_task": asyncio.create_task(_daily_metadata_sync_loop(pipeline)),
+        "storage": storage,
+        "metadata_sync_task": None if storage.is_database_mode else asyncio.create_task(_daily_metadata_sync_loop(pipeline)),
     })
     
     logger.info("=== AnySQL 已就绪 ===")
@@ -86,8 +90,21 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="AnySQL", version=__version__, lifespan=lifespan)
 
 # 挂载静态资源和模板
-app.mount("/static", StaticFiles(directory=BASE_DIR / "web" / "static"), name="static")
-templates = Jinja2Templates(directory=BASE_DIR / "web" / "templates")
+app.mount("/static", StaticFiles(directory=str(BASE_DIR / "web" / "static")), name="static")
+templates = Jinja2Templates(directory=str(BASE_DIR / "web" / "templates"))
+
+
+def _template_products() -> dict:
+    config = app_state.get("config")
+    storage = app_state.get("storage")
+    if storage and storage.is_database_mode:
+        from anysql.storage.repositories import ProductRepository
+        with storage.database.session() as session:
+            return {
+                product.code: ProductRepository(session).to_product_config(product)
+                for product in ProductRepository(session).list()
+            }
+    return config.products if config else {}
 
 # 包含 API 路由
 from anysql.api.analysis import router as analysis_router
@@ -104,18 +121,15 @@ app.include_router(search_router)
 # 页面路由
 @app.get("/", response_class=HTMLResponse)
 async def index_page(request: Request):
-    config = app_state.get("config")
-    return templates.TemplateResponse("index.html", {"request": request, "products": config.products if config else {}})
+    return templates.TemplateResponse(request, "index.html", {"products": _template_products()})
 
 @app.get("/products", response_class=HTMLResponse)
 async def products_page(request: Request):
-    config = app_state.get("config")
-    return templates.TemplateResponse("products.html", {"request": request, "products": config.products if config else {}})
+    return templates.TemplateResponse(request, "products.html", {"products": _template_products()})
 
 @app.get("/analysis", response_class=HTMLResponse)
 async def analysis_page(request: Request):
-    config = app_state.get("config")
-    return templates.TemplateResponse("analysis.html", {"request": request, "products": config.products if config else {}})
+    return templates.TemplateResponse(request, "analysis.html", {"products": _template_products()})
 
 @app.get("/sql/{sql_id}", response_class=HTMLResponse)
 async def sql_detail_page(request: Request, sql_id: str):
@@ -123,6 +137,15 @@ async def sql_detail_page(request: Request, sql_id: str):
     from anysql.harness.tasks import load_all_records
     decoded_id = urllib.parse.unquote(sql_id)
     config = app_state.get("config")
+    storage = app_state.get("storage")
+
+    if storage and storage.is_database_mode:
+        from anysql.storage.repositories import SQLKnowledgeRepository
+        with storage.database.session() as session:
+            record = SQLKnowledgeRepository(session).get(decoded_id)
+        if not record:
+            return HTMLResponse("<h1>Record Not Found</h1>", status_code=404)
+        return templates.TemplateResponse(request, "sql_detail.html", {"record": record})
     
     record = None
     if config:
@@ -137,7 +160,7 @@ async def sql_detail_page(request: Request, sql_id: str):
     if not record:
         return HTMLResponse("<h1>Record Not Found</h1>", status_code=404)
         
-    return templates.TemplateResponse("sql_detail.html", {"request": request, "record": record})
+    return templates.TemplateResponse(request, "sql_detail.html", {"record": record})
 
 if __name__ == "__main__":
     import uvicorn

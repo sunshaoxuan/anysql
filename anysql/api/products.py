@@ -11,6 +11,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 from anysql.config import DatabaseConfig, ProductConfig, save_config
 from anysql.logger import logger
 from anysql.models.schemas import ProductInfo, ProductUpsertRequest
+from anysql.storage.repositories import JobRepository, ProductRepository, SQLKnowledgeRepository
 
 router = APIRouter(prefix="/api/products", tags=["products"])
 
@@ -27,6 +28,17 @@ async def list_products():
     state = _get_app_state()
     config = state["config"]
     vector = state["vector"]
+    storage = state.get("storage")
+
+    if storage and storage.is_database_mode:
+        with storage.database.session() as session:
+            products = []
+            product_repo = ProductRepository(session)
+            sql_repo = SQLKnowledgeRepository(session)
+            for product in product_repo.list():
+                sql_count, analyzed = sql_repo.count_for_product(product.id)
+                products.append(product_repo.to_info(product, sql_count, analyzed))
+            return products
 
     products = []
     for pid, pcfg in config.products.items():
@@ -67,6 +79,16 @@ async def get_product(product_id: str):
     """获取单个产品详情"""
     state = _get_app_state()
     config = state["config"]
+    storage = state.get("storage")
+
+    if storage and storage.is_database_mode:
+        with storage.database.session() as session:
+            product_repo = ProductRepository(session)
+            product = product_repo.get_by_code(product_id)
+            if not product:
+                raise HTTPException(status_code=404, detail=f"产品不存在: {product_id}")
+            sql_count, analyzed = SQLKnowledgeRepository(session).count_for_product(product.id)
+            return product_repo.to_info(product, sql_count, analyzed)
 
     if product_id not in config.products:
         raise HTTPException(status_code=404, detail=f"产品不存在: {product_id}")
@@ -105,6 +127,21 @@ async def upsert_product(req: ProductUpsertRequest, background_tasks: Background
     """新增或更新产品配置"""
     state = _get_app_state()
     config = state["config"]
+    storage = state.get("storage")
+    if storage and storage.is_database_mode:
+        with storage.database.session() as session:
+            product_repo = ProductRepository(session)
+            job_repo = JobRepository(session)
+            product, is_new = product_repo.upsert(req)
+            sql_count, analyzed = SQLKnowledgeRepository(session).count_for_product(product.id)
+            info = product_repo.to_info(product, sql_count, analyzed)
+            job_id = None
+            if is_new:
+                job = job_repo.create("metadata_delta_sync", product.id, {"product_code": product.code, "reason": "initial"})
+                job_id = job.id
+        if job_id and storage.queue:
+            storage.queue.enqueue("anysql.worker_tasks.metadata_delta_sync", job_id, req.code)
+        return info
     original_id = None
     existing = None
     if req.physical_id:
@@ -158,6 +195,12 @@ async def delete_product(product_id: str):
     """删除产品配置，不删除磁盘上的产品数据。"""
     state = _get_app_state()
     config = state["config"]
+    storage = state.get("storage")
+    if storage and storage.is_database_mode:
+        with storage.database.session() as session:
+            if not ProductRepository(session).soft_delete(product_id):
+                raise HTTPException(status_code=404, detail=f"产品不存在: {product_id}")
+        return {"status": "deleted", "id": product_id}
     if product_id not in config.products:
         raise HTTPException(status_code=404, detail=f"产品不存在: {product_id}")
     config.products.pop(product_id)
@@ -174,6 +217,13 @@ async def list_product_sqls(product_id: str):
     """获取产品的所有 SQL 记录"""
     state = _get_app_state()
     config = state["config"]
+    storage = state.get("storage")
+    if storage and storage.is_database_mode:
+        with storage.database.session() as session:
+            product = ProductRepository(session).get_by_code(product_id)
+            if not product:
+                raise HTTPException(status_code=404, detail=f"产品不存在: {product_id}")
+            return [r.model_dump(mode="json") for r in SQLKnowledgeRepository(session).list_records(product.id)]
 
     if product_id not in config.products:
         raise HTTPException(status_code=404, detail=f"产品不存在: {product_id}")

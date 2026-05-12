@@ -43,13 +43,13 @@ class VectorDBConfig(BaseModel):
 
 class StorageConfig(BaseModel):
     """AnySQL 自身的系统数据存储配置"""
-    backend: str = "local"
+    backend: str = "postgresql"
     database_url: Optional[str] = None
 
 
 class QueueConfig(BaseModel):
     """后台任务队列配置"""
-    backend: str = "in_process"
+    backend: str = "redis"
     redis_url: Optional[str] = None
 
 
@@ -148,6 +148,18 @@ def load_config(config_path: Optional[str] = None) -> AppConfig:
         raw = yaml.safe_load(f) or {}
 
     _config = AppConfig(**raw)
+    if os.environ.get("ANYSQL_STORAGE_BACKEND"):
+        _config.storage.backend = os.environ["ANYSQL_STORAGE_BACKEND"]
+    if os.environ.get("ANYSQL_DATABASE_URL"):
+        _config.storage.database_url = os.environ["ANYSQL_DATABASE_URL"]
+    if os.environ.get("ANYSQL_QUEUE_BACKEND"):
+        _config.queue.backend = os.environ["ANYSQL_QUEUE_BACKEND"]
+    if os.environ.get("ANYSQL_REDIS_URL"):
+        _config.queue.redis_url = os.environ["ANYSQL_REDIS_URL"]
+    if os.environ.get("ANYSQL_LLM_BASE_URL"):
+        _config.llm.base_url = os.environ["ANYSQL_LLM_BASE_URL"]
+    if os.environ.get("ANYSQL_SERVER_PORT"):
+        _config.server.port = int(os.environ["ANYSQL_SERVER_PORT"])
     setup_file_logging(
         log_dir=_config.logging.dir,
         level=_config.logging.level,

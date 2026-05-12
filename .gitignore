@@ -22,6 +22,7 @@ config.yaml
 # Runtime data and generated artifacts
 data/
 products/
+deploy-data/
 *.log
 
 # Editor and OS files

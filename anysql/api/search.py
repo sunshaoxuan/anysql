@@ -9,6 +9,8 @@ import urllib.parse
 from fastapi import APIRouter, Query
 from anysql.logger import logger
 from anysql.models.schemas import SearchRequest, SearchResponse
+from anysql.storage.pgvector_engine import PGVectorRepository
+from anysql.storage.repositories import ProductRepository, SQLKnowledgeRepository
 
 router = APIRouter(prefix="/api/search", tags=["search"])
 
@@ -19,9 +21,14 @@ def _get_app_state():
 @router.post("", response_model=SearchResponse)
 async def search_sql_post(req: SearchRequest):
     state = _get_app_state()
+    storage = state.get("storage")
     vector = state["vector"]
     t0 = time.time()
-    results = await vector.search(query=req.query, product=req.product, top_k=req.top_k)
+    if storage and storage.is_database_mode:
+        with storage.database.session() as session:
+            results = await PGVectorRepository(session, state["llm"], state["config"].llm.embed_model).search(req.query, req.product, req.top_k)
+    else:
+        results = await vector.search(query=req.query, product=req.product, top_k=req.top_k)
     return SearchResponse(
         query=req.query,
         results=results,
@@ -32,8 +39,13 @@ async def search_sql_post(req: SearchRequest):
 @router.get("")
 async def search_sql_get(q: str = Query(...), product: str = None, k: int = 5):
     state = _get_app_state()
+    storage = state.get("storage")
     vector = state["vector"]
-    results = await vector.search(query=q, product=product, top_k=k)
+    if storage and storage.is_database_mode:
+        with storage.database.session() as session:
+            results = await PGVectorRepository(session, state["llm"], state["config"].llm.embed_model).search(q, product, k)
+    else:
+        results = await vector.search(query=q, product=product, top_k=k)
     return results
 
 @router.get("/sql/{sql_id}")
@@ -43,6 +55,14 @@ async def get_sql_detail(sql_id: str):
     decoded_id = urllib.parse.unquote(sql_id)
     state = _get_app_state()
     config = state["config"]
+    storage = state.get("storage")
+
+    if storage and storage.is_database_mode:
+        with storage.database.session() as session:
+            record = SQLKnowledgeRepository(session).get(decoded_id)
+            if record:
+                return record.model_dump(mode="json")
+        return {"error": f"Record not found: {decoded_id}"}
 
     parts = decoded_id.split("_")
     if len(parts) < 2: return {"error": "Invalid SQL ID"}

@@ -2,6 +2,31 @@
 
 All notable changes to AnySQL are documented in this file.
 
+## [0.3.0] - 2026-05-12
+
+### Added
+
+- Added PostgreSQL/pgvector as the team-mode system of record and vector backend.
+- Added SQLAlchemy models and Alembic migration for products, database connections, SQL records, analyses, metadata, drafts, acceptances, jobs, and embeddings.
+- Added repository boundaries for product, SQL knowledge, metadata, jobs, and vectors.
+- Added Redis/RQ worker and scheduler processes for metadata sync, SQL analysis, and embedding rebuild jobs.
+- Added Docker Compose deployment group with API, worker, scheduler, PostgreSQL, and Redis.
+- Added persistent `deploy-data` volume layout for config, imports, exports, logs, PostgreSQL, and Redis.
+- Added local migration CLI for importing `config.yaml` and `products/` into PostgreSQL and rebuilding embeddings.
+
+### Changed
+
+- Switched the default runtime architecture from local files/Chroma to PostgreSQL + pgvector + Redis/RQ.
+- Kept existing API paths while moving product, search, generation, assistant, and job behavior behind database-backed repositories.
+- Generated and revised SQL remain drafts until explicitly accepted through `/api/assistant/learn`.
+- Updated documentation to describe the implemented team architecture and Docker recovery behavior.
+- Bumped package version from `0.2.0` to `0.3.0`.
+
+### Fixed
+
+- Prevented database-mode SQL generation and learning from writing accepted knowledge back into local product files.
+- Prevented the scheduler from enqueueing a full daily sync immediately on every container restart.
+
 ## [0.2.0] - 2026-05-12
 
 ### Added
