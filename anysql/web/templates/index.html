@@ -71,6 +71,8 @@
 <script>
 let currentSqlId = null;
 let currentSql = null;
+let currentResponse = null;
+let lastRequirement = "";
 const sessionId = crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
 
 const SQL_KEYWORDS = new Set([
@@ -179,6 +181,7 @@ function renderMatches(matches) {
 }
 
 function renderRecord(response) {
+    currentResponse = response;
     const record = response.record;
     const analysis = record.analysis || {};
     const stmt = record.statement || {};
@@ -189,9 +192,15 @@ function renderRecord(response) {
     meta.dataset.empty = 'false';
     meta.innerText = `${response.mode.toUpperCase()} / ${stmt.id || ''}`;
     const detail = document.getElementById('detailLink');
-    detail.href = `/sql/${encodeURIComponent(stmt.id)}`;
-    detail.classList.remove('disabled-link');
-    detail.removeAttribute('aria-disabled');
+    if (response.learned || response.mode === 'matched') {
+        detail.href = `/sql/${encodeURIComponent(stmt.id)}`;
+        detail.classList.remove('disabled-link');
+        detail.removeAttribute('aria-disabled');
+    } else {
+        detail.href = '#';
+        detail.classList.add('disabled-link');
+        detail.setAttribute('aria-disabled', 'true');
+    }
     renderSql();
     renderMatches(response.matches || []);
 
@@ -205,10 +214,48 @@ function renderRecord(response) {
         </div>
         <h3>${escapeHtml(analysis.summary || 'SQL')}</h3>
         <p>${escapeHtml((analysis.business_context || []).join(' / '))}</p>
+        ${response.learned || response.mode === 'matched' ? '' : `<button class="btn btn-primary icon-btn" onclick="acceptCurrentSql(this)" title="${escapeHtml(t('accept'))}"><i class="fas fa-thumbs-up"></i></button>`}
     `);
 }
 
+async function acceptCurrentSql(btn) {
+    if (!currentResponse || !currentSql) return;
+    const record = currentResponse.record || {};
+    const analysis = record.analysis || {};
+    const stmt = record.statement || {};
+    const product = document.getElementById('productSelect').value;
+    const payload = {
+        product,
+        requirement: lastRequirement || stmt.comment || '',
+        sql: currentSql,
+        summary: analysis.summary || '',
+        business_meaning: (analysis.business_context || []).join(' / '),
+        usage_guide: analysis.usage_guide || '',
+        parameters: analysis.parameters || [],
+        tables: stmt.tables || []
+    };
+    const res = await fetch('/api/assistant/learn', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (!res.ok) {
+        addMessage('assistant', `<span style="color:#dc2626;">${escapeHtml(data.detail || 'learn error')}</span>`);
+        return;
+    }
+    renderRecord({
+        product,
+        mode: 'learned',
+        message: t('accept'),
+        matches: currentResponse.matches || [],
+        record: data.record,
+        learned: true
+    });
+}
+
 async function sendMessage(text) {
+    lastRequirement = text;
     const product = document.getElementById('productSelect').value;
     addMessage('user', escapeHtml(text));
     addMessage('assistant', `<i class="fas fa-spinner fa-spin"></i> ${escapeHtml(t('checking'))}`);

@@ -2,6 +2,19 @@
 
 All notable changes to AnySQL are documented in this file.
 
+## [0.1.9] - 2026-05-12
+
+### Added
+
+- Added Japanese query normalization before SQL and metadata retrieval.
+- Added product metadata vector indexing and metadata RAG search.
+- Added `POST /api/analysis/{product}/metadata-index` to rebuild metadata vectors.
+- Added `POST /api/assistant/learn` so users explicitly accept generated/revised SQL before it is persisted.
+
+### Changed
+
+- Assistant-generated and revised SQL now returns as a draft and no longer auto-pollutes the knowledge base.
+
 ## [0.1.8] - 2026-05-12
 
 ### Changed

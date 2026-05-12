@@ -1,5 +1,5 @@
 """
-AnySQL API - SQL 生成与自动知识沉淀。
+AnySQL API - SQL 生成草稿。
 """
 
 from __future__ import annotations
@@ -23,7 +23,8 @@ def _get_app_state():
 @router.post("/sql", response_model=SQLGenerationResponse)
 async def generate_sql(req: SQLGenerationRequest):
     """
-    根据产品 Metadata 和既有 SQL 知识生成 SQL，并自动加入知识库。
+    根据产品 Metadata 和既有 SQL 知识生成 SQL 草稿。
+    草稿需要通过 /api/assistant/learn 人工确认后才会入库。
     """
     state = _get_app_state()
     config = state["config"]
@@ -56,5 +57,5 @@ async def generate_sql(req: SQLGenerationRequest):
         requirement=req.requirement,
         generated=generated,
         record=record,
-        learned=True,
+        learned=False,
     )

@@ -163,7 +163,7 @@ class SQLGenerationResponse(BaseModel):
     requirement: str
     generated: GeneratedSQL
     record: SQLRecord
-    learned: bool = True
+    learned: bool = False
 
 
 class SQLCandidateMatch(BaseModel):
@@ -194,6 +194,18 @@ class SQLAssistantResponse(BaseModel):
     matches: list[SQLCandidateMatch] = Field(default_factory=list)
     record: SQLRecord
     learned: bool = False
+
+
+class SQLLearnRequest(BaseModel):
+    """人工确认后将当前 SQL 草稿纳入知识库"""
+    product: str
+    requirement: str
+    sql: str
+    summary: str = ""
+    business_meaning: str = ""
+    usage_guide: str = ""
+    parameters: list[str] = Field(default_factory=list)
+    tables: list[str] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

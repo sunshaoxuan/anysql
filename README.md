@@ -14,6 +14,9 @@ AnySQL is a FastAPI-based platform for analyzing SQL assets with an LLM, indexin
 - Desktop-first SQL workbench with a 1K minimum layout, expanded SQL viewer, syntax coloring, basic SQL formatting, and optional comment stripping for tools with weak comment handling.
 - Japanese, Chinese, and English UI language switching, defaulting to Japanese.
 - Product management for adding/editing product definitions and always-on product rules used as LLM guardrails.
+- Japanese is the retrieval pivot language because product metadata is usually stored in Japanese; non-Japanese user requests are normalized before retrieval.
+- Product metadata can be vectorized for RAG and used alongside known SQL examples.
+- Generated or revised SQL is returned as a draft and is only written to the knowledge base after explicit user acceptance.
 - Web UI for search, product status, and analysis progress.
 - UTF-8 first handling for Chinese, Japanese, and English SQL assets.
 
@@ -73,6 +76,8 @@ AnySQL does not require user login in the current local deployment model.
 - `POST /api/search`
 - `POST /api/generate/sql`
 - `POST /api/assistant/sql`
+- `POST /api/assistant/learn`
+- `POST /api/analysis/{product}/metadata-index`
 
 ### SQL Assistant
 

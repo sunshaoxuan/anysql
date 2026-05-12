@@ -33,3 +33,14 @@ async def start_analysis(product: str, background_tasks: BackgroundTasks, force:
     # 在后台运行解析，不阻塞前端
     background_tasks.add_task(pipeline.run, product, force)
     return {"message": f"解析プロセスを開始しました: {product}", "status": "started"}
+
+
+@router.post("/{product}/metadata-index")
+async def index_metadata(product: str):
+    """手动重建产品 Metadata 向量索引。"""
+    pipeline = _get_pipeline()
+    if product not in pipeline.config.products:
+        raise HTTPException(status_code=404, detail=f"产品不存在: {product}")
+    pcfg = pipeline.config.products[product]
+    count = await pipeline.vector.index_metadata(product, pcfg.metadata_dir)
+    return {"status": "indexed", "product": product, "count": count}

@@ -83,6 +83,52 @@ class AnalysisPipeline:
                 snapshot[table_name] = meta
         return snapshot
 
+    async def _normalize_query_to_japanese(self, text: str) -> str:
+        """把用户输入规范成日文检索意图，贴近元数据语言。"""
+        prompt = f"""次のSQL検索/生成要求を、日本語の業務検索クエリに変換してください。
+元の意味を保ち、テーブル名・項目名・業務用語の候補を日本語中心に補ってください。
+JSONだけ返してください: {{"query_ja": "..."}}
+
+入力:
+{text}
+"""
+        try:
+            data = await self.llm.chat_json(prompt, system_prompt="日本語SQL検索クエリ変換器。JSONのみ返す。", temperature=0.1)
+            query_ja = str(data.get("query_ja", "")).strip()
+            return query_ja or text
+        except Exception as e:
+            logger.warning(f"日文查询规范化失败，使用原文: {e}")
+            return text
+
+    @staticmethod
+    def _draft_record(product_id: str, requirement: str, generated: GeneratedSQL) -> SQLRecord:
+        sql = generated.sql.strip().rstrip(";") + ";"
+        tables = [t.upper() for t in generated.tables] or _extract_tables(sql)
+        stmt = SQLStatement(
+            id=f"{product_id}_draft_{datetime.now().strftime('%Y%m%d%H%M%S')}",
+            product=product_id,
+            source_file="draft.sql",
+            raw_sql=sql,
+            comment=f"Draft requirement: {requirement}",
+            tables=tables,
+            statement_type=_detect_type(sql),
+            line_number=0,
+        )
+        analysis = SQLAnalysis(
+            summary=generated.summary or "SQL draft",
+            business_context=[generated.business_meaning] if generated.business_meaning else [],
+            tables_involved={t: "" for t in tables},
+            usage_guide=generated.usage_guide,
+            parameters=generated.parameters,
+            keywords=tables,
+        )
+        return SQLRecord(
+            statement=stmt,
+            analysis=analysis,
+            status=AnalysisStatus.PENDING,
+            analyzed_at=datetime.now(),
+        )
+
     @staticmethod
     def _record_to_generated(record: SQLRecord) -> GeneratedSQL:
         analysis = record.analysis
@@ -204,7 +250,12 @@ class AnalysisPipeline:
         if not collector.load_index():
             await collector.collect_all()
 
-        similar = await self.vector.search(requirement, product=product_id, top_k=top_k)
+        query_ja = await self._normalize_query_to_japanese(requirement)
+        similar = await self.vector.search(query_ja, product=product_id, top_k=top_k)
+        metadata_hits = await self.vector.search_metadata(query_ja, product_id, top_k=8)
+        if not metadata_hits:
+            await self.vector.index_metadata(product_id, product_cfg.metadata_dir)
+            metadata_hits = await self.vector.search_metadata(query_ja, product_id, top_k=8)
         examples = []
         for item in similar:
             examples.append(
@@ -217,17 +268,27 @@ class AnalysisPipeline:
         table_names = index.get("table_names", [])
         table_hint = ", ".join(table_names[:200]) if isinstance(table_names, list) else ""
         product_rules = product_cfg.rules.strip() or "No product-specific rules."
+        metadata_context = "\n\n".join(
+            f"- {m['table']} score={m['score']}\n{m['document']}"
+            for m in metadata_hits
+        ) or "No metadata vector hits."
 
         prompt = f"""你要为产品 {product_id} 生成一段满足业务需求的 SQL。
 
 业务需求:
 {requirement}
 
+日文检索意图（元数据语言）:
+{query_ja}
+
 产品规则（必须遵守，优先级高于一般推断）:
 {product_rules}
 
 可用表名候选（只展示前200个，必要时根据相似SQL推断）:
 {table_hint or "No metadata index available."}
+
+Metadata RAG 候选（优先参考）:
+{metadata_context}
 
 相似SQL知识:
 {chr(10).join(examples) if examples else "No similar SQL knowledge found."}
@@ -239,7 +300,7 @@ class AnalysisPipeline:
 4. 只返回 JSON，不要返回 Markdown。
 """
         generated = await self.agent.execute_task(prompt, GeneratedSQL)
-        return await self._persist_generated_knowledge(product_id, requirement, generated)
+        return self._draft_record(product_id, requirement, generated)
 
     async def _llm_match_candidates(
         self,
@@ -324,6 +385,15 @@ class AnalysisPipeline:
 3. 只返回 JSON。
 """
         generated = await self.agent.execute_task(prompt, GeneratedSQL)
+        return self._draft_record(product_id, requirement, generated)
+
+    async def learn_confirmed_sql(
+        self,
+        product_id: str,
+        requirement: str,
+        generated: GeneratedSQL,
+    ) -> SQLRecord:
+        """人工确认后，将草稿 SQL 落盘并进入向量知识库。"""
         return await self._persist_generated_knowledge(product_id, requirement, generated)
 
     async def assist_sql(
@@ -336,10 +406,11 @@ class AnalysisPipeline:
     ) -> tuple[str, SQLRecord, list[SQLCandidateMatch], bool]:
         if current_sql:
             record = await self.revise_and_learn(product_id, message, current_sql)
-            return "revised", record, [], True
+            return "revised", record, [], False
 
-        candidates = await self.vector.search(message, product=product_id, top_k=top_k)
-        matches = await self._llm_match_candidates(product_id, message, candidates)
+        query_ja = await self._normalize_query_to_japanese(message)
+        candidates = await self.vector.search(query_ja, product=product_id, top_k=top_k)
+        matches = await self._llm_match_candidates(product_id, f"{message}\n日文检索意图: {query_ja}", candidates)
         best = matches[0] if matches else None
         if best and best.llm_score >= match_threshold:
             from anysql.harness.tasks import load_all_records
@@ -350,7 +421,7 @@ class AnalysisPipeline:
                     return "matched", record, matches, False
 
         record = await self.generate_and_learn(product_id, message, top_k=top_k)
-        return "generated", record, matches, True
+        return "generated", record, matches, False
 
     async def run(self, product_id: str, force: bool = False):
         if product_id not in self.config.products:
@@ -424,6 +495,7 @@ class AnalysisPipeline:
             from anysql.harness.tasks import load_all_records
             all_records = load_all_records(product_cfg.desc_dir)
             await self.vector.index_records([r for r in all_records if r.status == AnalysisStatus.SUCCESS], product_id)
+            await self.vector.index_metadata(product_id, product_cfg.metadata_dir)
             
         except Exception as e:
             logger.error(f"Pipeline crashed: {e}")

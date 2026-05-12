@@ -8,6 +8,8 @@ AnySQL 向量引擎
 from __future__ import annotations
 
 import time
+import json
+from pathlib import Path
 from typing import Optional
 
 import chromadb
@@ -42,6 +44,9 @@ class VectorEngine:
     def _collection_name(self, product: str) -> str:
         return f"{self.prefix}_{product}"
 
+    def _metadata_collection_name(self, product: str) -> str:
+        return f"{self.prefix}_{product}_metadata"
+
     def _get_or_create_collection(self, product: str) -> chromadb.Collection:
         name = self._collection_name(product)
         collection = self._client.get_or_create_collection(
@@ -49,6 +54,15 @@ class VectorEngine:
             metadata={"hnsw:space": "cosine"},
         )
         logger.debug(f"Collection '{name}': {collection.count()} 条记录")
+        return collection
+
+    def _get_or_create_metadata_collection(self, product: str) -> chromadb.Collection:
+        name = self._metadata_collection_name(product)
+        collection = self._client.get_or_create_collection(
+            name=name,
+            metadata={"hnsw:space": "cosine"},
+        )
+        logger.debug(f"Metadata Collection '{name}': {collection.count()} 条记录")
         return collection
 
     # ------------------------------------------------------------------
@@ -268,6 +282,100 @@ class VectorEngine:
             if line.startswith("SQL: "):
                 return line[5:]
         return ""
+
+    # ------------------------------------------------------------------
+    # Metadata RAG
+    # ------------------------------------------------------------------
+
+    async def index_metadata(self, product: str, metadata_dir: str, limit: int | None = None) -> int:
+        """将产品表元数据向量化，供 SQL 生成 RAG 使用。"""
+        tables_dir = Path(metadata_dir) / "tables"
+        if not tables_dir.exists():
+            logger.warning(f"元数据目录不存在: {tables_dir}")
+            return 0
+
+        files = sorted(tables_dir.glob("*.json"))
+        if limit:
+            files = files[:limit]
+
+        docs: list[str] = []
+        ids: list[str] = []
+        metadatas: list[dict] = []
+        for path in files:
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except Exception as e:
+                logger.warning(f"跳过无效元数据 {path}: {e}")
+                continue
+            table = path.stem.upper()
+            docs.append(self._metadata_doc(table, data))
+            ids.append(f"{product}_table_{table}")
+            metadatas.append({"product": product, "table": table, "source_file": path.name})
+
+        if not docs:
+            return 0
+
+        embeddings = await self.llm.embed(docs)
+        valid = [i for i, emb in enumerate(embeddings) if emb]
+        collection = self._get_or_create_metadata_collection(product)
+        if valid:
+            collection.upsert(
+                ids=[ids[i] for i in valid],
+                documents=[docs[i] for i in valid],
+                metadatas=[metadatas[i] for i in valid],
+                embeddings=[embeddings[i] for i in valid],
+            )
+        logger.info(f"元数据向量索引完成: {product} {len(valid)}/{len(docs)}")
+        return len(valid)
+
+    async def search_metadata(self, query: str, product: str, top_k: int = 8) -> list[dict]:
+        """搜索产品表元数据。"""
+        query_embedding = await self.llm.embed([query])
+        if not query_embedding or not query_embedding[0]:
+            return []
+        collection = self._get_or_create_metadata_collection(product)
+        if collection.count() == 0:
+            return []
+        results = collection.query(
+            query_embeddings=[query_embedding[0]],
+            n_results=min(top_k, collection.count()),
+        )
+        rows: list[dict] = []
+        for i, doc_id in enumerate(results["ids"][0] if results and results.get("ids") else []):
+            meta = results["metadatas"][0][i] if results.get("metadatas") else {}
+            distance = results["distances"][0][i] if results.get("distances") else 1.0
+            doc = results["documents"][0][i] if results.get("documents") else ""
+            rows.append({
+                "id": doc_id,
+                "table": meta.get("table", ""),
+                "score": round(max(0, 1 - distance), 4),
+                "document": doc,
+            })
+        return rows
+
+    @staticmethod
+    def _metadata_doc(table: str, data: dict) -> str:
+        parts = [f"テーブル: {table}"]
+        for key in ("comment", "description", "remarks", "table_comment"):
+            if data.get(key):
+                parts.append(f"説明: {data[key]}")
+        columns = data.get("columns") or data.get("COLUMN") or data.get("COLUMNS") or []
+        if isinstance(columns, list):
+            column_lines = []
+            for col in columns[:80]:
+                if isinstance(col, dict):
+                    name = col.get("name") or col.get("column_name") or col.get("COLUMN_NAME") or ""
+                    comment = col.get("comment") or col.get("comments") or col.get("COLUMN_COMMENT") or col.get("remarks") or ""
+                    dtype = col.get("type") or col.get("data_type") or col.get("DATA_TYPE") or ""
+                    column_lines.append(f"{name} {dtype} {comment}".strip())
+                else:
+                    column_lines.append(str(col))
+            parts.append("カラム: " + " / ".join(column_lines))
+        elif columns:
+            parts.append(f"カラム: {str(columns)[:1500]}")
+        else:
+            parts.append("JSON: " + json.dumps(data, ensure_ascii=False)[:1500])
+        return "\n".join(parts)
 
     # ------------------------------------------------------------------
     # 管理
