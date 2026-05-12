@@ -1,14 +1,14 @@
 {% extends "layout.html" %}
 
 {% block content %}
-<div class="app-container">
+<div class="workbench-container">
     <div class="assistant-shell">
         <section class="assistant-panel">
             <div class="assistant-head">
                 <div>
                     <div class="badge badge-blue">SQL Assistant</div>
                     <h1>AnySQL Intelligence</h1>
-                    <p>製品メタデータと蓄積済みSQL知識だけを使って、検索・生成・修正を行います。</p>
+                    <p>SQLに限定した検索・生成・修正ワークベンチ。</p>
                 </div>
                 <select id="productSelect" class="product-select">
                     {% for id, product in products.items() %}
@@ -21,31 +21,47 @@
                 <div class="chat-message assistant">
                     <div class="avatar">AI</div>
                     <div class="bubble">
-                        SQLで確認したい業務条件を入力してください。高い一致があれば既存SQLを返し、足りなければ新しく作成して知識化します。
+                        条件を入力してください。高一致のSQLがあれば再利用し、足りなければMetadataから作成して知識化します。
                     </div>
                 </div>
             </div>
 
             <form id="assistantForm" class="assistant-input">
-                <textarea id="messageInput" rows="3" placeholder="例: 2026年1月以降に異動した職員を所属順に取得したい"></textarea>
+                <textarea id="messageInput" rows="4" placeholder="例: 2026年1月以降に異動した職員を所属順に取得したい"></textarea>
                 <button type="submit" class="btn btn-primary">
                     <i class="fas fa-paper-plane"></i> 送信
                 </button>
             </form>
         </section>
 
-        <aside class="assistant-side">
-            <div class="side-block">
-                <div class="side-label">現在のSQL</div>
-                <div id="currentSqlMeta" class="side-muted">まだSQLは選択されていません。</div>
-                <pre id="currentSql" class="side-sql"></pre>
-                <button type="button" class="btn btn-outline side-reset" onclick="resetCurrentSql()">新規相談</button>
+        <section class="sql-workspace">
+            <div class="sql-toolbar">
+                <div>
+                    <div class="side-label">現在のSQL</div>
+                    <div id="currentSqlMeta" class="side-muted">まだSQLは選択されていません。</div>
+                </div>
+                <div class="sql-actions">
+                    <label class="comment-toggle">
+                        <input type="checkbox" id="includeComments" checked>
+                        <span>注釈を含める</span>
+                    </label>
+                    <button type="button" class="btn btn-outline" onclick="copyCurrentSql(this)">
+                        <i class="far fa-copy"></i> Copy
+                    </button>
+                    <button type="button" class="btn btn-outline" onclick="resetCurrentSql()">新規相談</button>
+                    <a id="detailLink" class="btn btn-outline disabled-link" href="#" aria-disabled="true">詳細</a>
+                </div>
             </div>
-            <div class="side-block">
+
+            <div class="sql-stage">
+                <pre id="currentSql" class="sql-code empty">SQL will appear here.</pre>
+            </div>
+
+            <div class="match-panel">
                 <div class="side-label">マッチ判定</div>
                 <div id="matchList" class="match-list"></div>
             </div>
-        </aside>
+        </section>
     </div>
 </div>
 {% endblock %}
@@ -56,6 +72,13 @@ let currentSqlId = null;
 let currentSql = null;
 const sessionId = crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
 
+const SQL_KEYWORDS = new Set([
+    'SELECT','FROM','WHERE','JOIN','INNER','LEFT','RIGHT','FULL','OUTER','ON','AND','OR','NOT','IN','EXISTS',
+    'GROUP','BY','ORDER','HAVING','UNION','ALL','INSERT','INTO','VALUES','UPDATE','SET','DELETE','CREATE',
+    'ALTER','DROP','MERGE','CASE','WHEN','THEN','ELSE','END','AS','DISTINCT','BETWEEN','LIKE','IS','NULL',
+    'TO_DATE','NVL','COALESCE','COUNT','SUM','MIN','MAX','AVG','OVER','PARTITION'
+]);
+
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, ch => ({
     '&': '&amp;',
     '<': '&lt;',
@@ -63,6 +86,65 @@ const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, ch => ({
     '"': '&quot;',
     "'": '&#39;'
 }[ch]));
+
+function stripSqlComments(sql) {
+    return String(sql || '')
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .split('\n')
+        .map(line => line.replace(/--.*$/g, '').trimEnd())
+        .filter(line => line.trim().length > 0)
+        .join('\n');
+}
+
+function formatSql(sql) {
+    let text = String(sql || '').replace(/\s+/g, ' ').trim();
+    if (!text) return '';
+    const clauses = [
+        'SELECT', 'FROM', 'WHERE', 'GROUP BY', 'HAVING', 'ORDER BY',
+        'INNER JOIN', 'LEFT JOIN', 'RIGHT JOIN', 'FULL JOIN', 'JOIN',
+        'UNION ALL', 'UNION', 'VALUES', 'SET'
+    ];
+    clauses.forEach(clause => {
+        const pattern = new RegExp(`\\s+(${clause.replace(' ', '\\s+')})\\s+`, 'ig');
+        text = text.replace(pattern, `\n$1 `);
+    });
+    text = text
+        .replace(/\s+(AND|OR)\s+/ig, '\n  $1 ')
+        .replace(/,\s*/g, ',\n  ')
+        .replace(/^\n+/, '');
+    return text;
+}
+
+function highlightSql(sql) {
+    const formatted = formatSql(sql);
+    const escaped = escapeHtml(formatted);
+    return escaped.replace(/('[^']*'|:[A-Za-z_][\w]*|\b[A-Za-z_][\w$#]*\b|\b\d+(?:\.\d+)?\b|[(),.;=*<>+-])/g, token => {
+        const upper = token.toUpperCase();
+        if (token.startsWith("'")) return `<span class="sql-string">${token}</span>`;
+        if (token.startsWith(':')) return `<span class="sql-param">${token}</span>`;
+        if (/^\d/.test(token)) return `<span class="sql-number">${token}</span>`;
+        if (SQL_KEYWORDS.has(upper)) return `<span class="sql-keyword">${upper}</span>`;
+        if (/^[(),.;=*<>+-]$/.test(token)) return `<span class="sql-symbol">${token}</span>`;
+        return `<span class="sql-ident">${token}</span>`;
+    });
+}
+
+function visibleSql() {
+    const include = document.getElementById('includeComments').checked;
+    return include ? currentSql || '' : stripSqlComments(currentSql || '');
+}
+
+function renderSql() {
+    const el = document.getElementById('currentSql');
+    const sql = visibleSql();
+    if (!sql) {
+        el.className = 'sql-code empty';
+        el.textContent = 'SQL will appear here.';
+        return;
+    }
+    el.className = 'sql-code';
+    el.innerHTML = highlightSql(sql);
+}
 
 function addMessage(role, html) {
     const log = document.getElementById('chatLog');
@@ -84,13 +166,17 @@ function copyToClipboard(text, btn) {
     });
 }
 
+function copyCurrentSql(btn) {
+    copyToClipboard(visibleSql(), btn);
+}
+
 function renderMatches(matches) {
     const el = document.getElementById('matchList');
     if (!matches || matches.length === 0) {
         el.innerHTML = '<div class="side-muted">候補なし</div>';
         return;
     }
-    el.innerHTML = matches.slice(0, 5).map(m => `
+    el.innerHTML = matches.slice(0, 6).map(m => `
         <div class="match-row">
             <div>${escapeHtml(m.sql_id)}</div>
             <strong>${Math.round((m.llm_score || 0) * 100)}%</strong>
@@ -104,16 +190,19 @@ function renderRecord(response) {
     const analysis = record.analysis || {};
     const stmt = record.statement || {};
     currentSqlId = stmt.id;
-    currentSql = stmt.raw_sql;
+    currentSql = stmt.raw_sql || '';
 
     document.getElementById('currentSqlMeta').innerText = `${response.mode.toUpperCase()} / ${stmt.id || ''}`;
-    document.getElementById('currentSql').innerText = currentSql || '';
+    const detail = document.getElementById('detailLink');
+    detail.href = `/sql/${encodeURIComponent(stmt.id)}`;
+    detail.classList.remove('disabled-link');
+    detail.removeAttribute('aria-disabled');
+    renderSql();
     renderMatches(response.matches || []);
 
     const learnedBadge = response.learned
         ? '<span class="badge badge-green">Learned</span>'
         : '<span class="badge badge-blue">Matched</span>';
-    const sql = escapeHtml(currentSql || '');
     addMessage('assistant', `
         <div class="result-head">
             ${learnedBadge}
@@ -121,13 +210,6 @@ function renderRecord(response) {
         </div>
         <h3>${escapeHtml(analysis.summary || 'SQL')}</h3>
         <p>${escapeHtml((analysis.business_context || []).join(' / '))}</p>
-        <pre class="result-sql"><code>${sql}</code></pre>
-        <div class="result-actions">
-            <button class="btn btn-outline" onclick="copyToClipboard(currentSql, this)">
-                <i class="far fa-copy"></i> Copy
-            </button>
-            <a class="btn btn-outline" href="/sql/${encodeURIComponent(stmt.id)}">詳細</a>
-        </div>
     `);
 }
 
@@ -176,12 +258,18 @@ document.getElementById('productSelect').addEventListener('change', () => {
     resetCurrentSql();
 });
 
+document.getElementById('includeComments').addEventListener('change', renderSql);
+
 function resetCurrentSql() {
     currentSqlId = null;
     currentSql = null;
     document.getElementById('currentSqlMeta').innerText = 'まだSQLは選択されていません。';
-    document.getElementById('currentSql').innerText = '';
     document.getElementById('matchList').innerHTML = '';
+    const detail = document.getElementById('detailLink');
+    detail.href = '#';
+    detail.classList.add('disabled-link');
+    detail.setAttribute('aria-disabled', 'true');
+    renderSql();
 }
 </script>
 {% endblock %}

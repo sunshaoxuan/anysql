@@ -11,6 +11,7 @@ AnySQL is a FastAPI-based platform for analyzing SQL assets with an LLM, indexin
 - SQL generation from product metadata and existing SQL knowledge.
 - Automatic knowledge growth: generated SQL is analyzed, persisted, and indexed without an extra manual registration step.
 - SQL-only assistant workflow: match existing SQL with LLM-scored confidence, generate when confidence is low, revise from user feedback, and learn every generated/revised result.
+- Desktop-first SQL workbench with a 1K minimum layout, expanded SQL viewer, syntax coloring, basic SQL formatting, and optional comment stripping for tools with weak comment handling.
 - Web UI for search, product status, and analysis progress.
 - UTF-8 first handling for Chinese, Japanese, and English SQL assets.
 
@@ -55,6 +56,8 @@ Then open:
 - Search UI: `http://127.0.0.1:8768/`
 - Product page: `http://127.0.0.1:8768/products`
 - Analysis dashboard: `http://127.0.0.1:8768/analysis`
+
+The main SQL assistant UI is desktop-first and targets screens of at least 1024px width.
 
 ## API Overview
 

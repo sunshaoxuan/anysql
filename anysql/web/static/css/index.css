@@ -26,6 +26,7 @@ body {
     font-family: var(--font-family);
     line-height: 1.6;
     -webkit-font-smoothing: antialiased;
+    min-width: 1024px;
 }
 
 /* 优雅的布局容器 */
@@ -33,6 +34,12 @@ body {
     max-width: 1200px;
     margin: 0 auto;
     padding: 2rem;
+}
+
+.workbench-container {
+    min-width: 1024px;
+    width: 100%;
+    padding: 1.25rem;
 }
 
 /* 顶部导航：极简明亮 */
@@ -169,42 +176,37 @@ body {
     border-left: 4px solid var(--accent);
 }
 
-/* 响应式调整 */
-@media (max-width: 768px) {
-    .search-hero h1 { font-size: 2rem; }
-    .app-container { padding: 1rem; }
-}
-
 .assistant-shell {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 360px;
-    gap: 1.5rem;
-    min-height: calc(100vh - 180px);
+    grid-template-columns: minmax(320px, 1fr) minmax(640px, 2fr);
+    gap: 1rem;
+    min-height: calc(100vh - 116px);
 }
 
 .assistant-panel,
-.assistant-side {
+.sql-workspace {
     background: var(--bg-main);
     border: 1px solid var(--border);
-    border-radius: 12px;
+    border-radius: 8px;
 }
 
 .assistant-panel {
     display: grid;
-    grid-template-rows: auto minmax(360px, 1fr) auto;
+    grid-template-rows: auto minmax(320px, 1fr) auto;
     overflow: hidden;
+    min-width: 0;
 }
 
 .assistant-head {
     display: flex;
-    justify-content: space-between;
+    flex-direction: column;
     gap: 1rem;
-    padding: 1.5rem;
+    padding: 1rem;
     border-bottom: 1px solid var(--border);
 }
 
 .assistant-head h1 {
-    font-size: 1.5rem;
+    font-size: 1.25rem;
     margin: 0.75rem 0 0.25rem;
 }
 
@@ -215,7 +217,7 @@ body {
 
 .product-select {
     align-self: flex-start;
-    min-width: 220px;
+    width: 100%;
     padding: 0.7rem 0.9rem;
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -223,7 +225,7 @@ body {
 }
 
 .chat-log {
-    padding: 1.25rem;
+    padding: 1rem;
     overflow-y: auto;
     display: flex;
     flex-direction: column;
@@ -260,7 +262,7 @@ body {
 }
 
 .bubble {
-    max-width: min(760px, 100%);
+    max-width: 100%;
     background: var(--bg-sub);
     border: 1px solid var(--border);
     border-radius: 10px;
@@ -275,7 +277,7 @@ body {
 
 .assistant-input {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: 1fr;
     gap: 0.75rem;
     padding: 1rem;
     border-top: 1px solid var(--border);
@@ -297,13 +299,6 @@ body {
     box-shadow: 0 0 0 3px var(--accent-light);
 }
 
-.assistant-side {
-    padding: 1rem;
-    align-self: start;
-    position: sticky;
-    top: 88px;
-}
-
 .side-block + .side-block {
     margin-top: 1.25rem;
     padding-top: 1.25rem;
@@ -321,23 +316,6 @@ body {
 .side-muted {
     color: var(--text-sub);
     font-size: 0.86rem;
-}
-
-.side-sql,
-.result-sql {
-    margin-top: 0.75rem;
-    background: #0F172A;
-    color: #E2E8F0;
-    border-radius: 8px;
-    padding: 1rem;
-    overflow-x: auto;
-    white-space: pre-wrap;
-    font-size: 0.82rem;
-}
-
-.side-reset {
-    width: 100%;
-    margin-top: 0.75rem;
 }
 
 .result-head,
@@ -363,20 +341,105 @@ body {
     font-size: 0.9rem;
 }
 
+.sql-workspace {
+    display: grid;
+    grid-template-rows: auto minmax(460px, 1fr) auto;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.sql-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+    padding: 1rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.sql-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.comment-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.55rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-sub);
+    color: var(--text-main);
+    font-size: 0.86rem;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.comment-toggle input {
+    width: 16px;
+    height: 16px;
+}
+
+.sql-stage {
+    min-height: 0;
+    overflow: hidden;
+    background: #0F172A;
+}
+
+.sql-code {
+    height: 100%;
+    margin: 0;
+    padding: 1.25rem 1.4rem;
+    overflow: auto;
+    white-space: pre;
+    tab-size: 2;
+    color: #CBD5E1;
+    font-family: Consolas, 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.95rem;
+    line-height: 1.65;
+}
+
+.sql-code.empty {
+    color: #64748B;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.sql-keyword { color: #60A5FA; font-weight: 700; }
+.sql-string { color: #86EFAC; }
+.sql-param { color: #FBBF24; font-weight: 700; }
+.sql-number { color: #FCA5A5; }
+.sql-symbol { color: #E2E8F0; }
+.sql-ident { color: #CBD5E1; }
+
+.match-panel {
+    padding: 0.85rem 1rem 1rem;
+    border-top: 1px solid var(--border);
+    background: var(--bg-main);
+    max-height: 190px;
+    overflow-y: auto;
+}
+
 .match-list {
     display: grid;
-    gap: 0.6rem;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.55rem;
 }
 
 .match-row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
-    gap: 0.35rem 0.75rem;
-    padding: 0.7rem;
+    gap: 0.25rem 0.75rem;
+    padding: 0.55rem 0.65rem;
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: 6px;
     background: var(--bg-sub);
-    font-size: 0.8rem;
+    font-size: 0.78rem;
 }
 
 .match-row div {
@@ -388,30 +451,12 @@ body {
 .match-row small {
     grid-column: 1 / -1;
     color: var(--text-sub);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
-@media (max-width: 980px) {
-    .assistant-shell {
-        grid-template-columns: 1fr;
-    }
-
-    .assistant-side {
-        position: static;
-    }
-}
-
-@media (max-width: 640px) {
-    .assistant-head,
-    .assistant-input {
-        grid-template-columns: 1fr;
-        display: grid;
-    }
-
-    .assistant-head {
-        display: grid;
-    }
-
-    .product-select {
-        width: 100%;
-    }
+.disabled-link {
+    pointer-events: none;
+    opacity: 0.45;
 }

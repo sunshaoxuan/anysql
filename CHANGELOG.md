@@ -2,6 +2,15 @@
 
 All notable changes to AnySQL are documented in this file.
 
+## [0.1.4] - 2026-05-12
+
+### Changed
+
+- Reworked the assistant UI as a desktop-first workbench with a 1024px minimum width.
+- Allocated roughly one third of the screen to chat and two thirds to the SQL workspace.
+- Expanded the SQL viewer and added basic formatting plus keyword, string, parameter, number, and symbol coloring.
+- Added a comment toggle so displayed/copied SQL can include comments or strip all SQL comments.
+
 ## [0.1.3] - 2026-05-12
 
 ### Added
