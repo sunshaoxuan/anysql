@@ -178,7 +178,7 @@ body {
 
 .assistant-shell {
     display: grid;
-    grid-template-columns: minmax(320px, 1fr) minmax(640px, 2fr);
+    grid-template-columns: minmax(360px, 38.2fr) minmax(600px, 61.8fr);
     gap: 1rem;
     min-height: calc(100vh - 116px);
 }
