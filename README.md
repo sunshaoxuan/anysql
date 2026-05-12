@@ -1,13 +1,13 @@
 # AnySQL
 
-AnySQL is a FastAPI-based platform for analyzing SQL assets with an LLM, indexing the results in ChromaDB, and searching SQL by natural language.
+AnySQL is a FastAPI-based platform for analyzing SQL assets with an LLM, indexing SQL and metadata knowledge, and helping users search, generate, revise, and approve SQL.
 
 ## Features
 
 - SQL file scanning and statement extraction.
 - LLM-assisted SQL summaries, usage guidance, categories, keywords, and business context.
 - Metadata-aware analysis using local database metadata snapshots.
-- ChromaDB semantic search with Ollama-compatible embeddings.
+- Semantic search with Ollama-compatible embeddings. Local mode uses ChromaDB; the 50-user production target is PostgreSQL + pgvector or a service vector backend.
 - SQL generation from product metadata and existing SQL knowledge.
 - Human-approved knowledge growth: generated SQL is returned as a draft and enters the knowledge base only after explicit acceptance.
 - SQL-only assistant workflow: match existing SQL with LLM-scored confidence, generate when confidence is low, revise from user feedback, and learn accepted generated/revised results.
@@ -20,6 +20,19 @@ AnySQL is a FastAPI-based platform for analyzing SQL assets with an LLM, indexin
 - Generated or revised SQL is returned as a draft and is only written to the knowledge base after explicit user acceptance.
 - Web UI for search, product status, and analysis progress.
 - UTF-8 first handling for Chinese, Japanese, and English SQL assets.
+
+## Architecture Direction
+
+The current local mode is useful for development and validation, but it is not the intended 50-user shared deployment architecture.
+
+For a team deployment, AnySQL should use:
+
+- PostgreSQL as the system of record for products, rules, metadata, accepted SQL knowledge, chat history, sync jobs, and audit history.
+- pgvector in PostgreSQL as the default vector backend for this scale, or Qdrant/Chroma service mode if a separate vector service is preferred.
+- Redis-backed workers for metadata sync, SQL analysis, embedding rebuilds, and scheduled jobs.
+- File/object storage only for imported SQL files and exports, not for canonical shared knowledge.
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the 50-user architecture and migration plan.
 
 ## Repository Policy
 
@@ -39,6 +52,8 @@ Use `config.example.yaml` as the template for local setup.
   - embedding model, for example `bge-m3`
 - Optional Oracle client dependency if database metadata must be collected live:
   - `pip install ".[oracle]"`
+- Production storage and worker dependencies:
+  - `pip install ".[production]"`
 
 ## Setup
 

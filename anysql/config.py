@@ -33,8 +33,24 @@ class LLMConfig(BaseModel):
 
 class VectorDBConfig(BaseModel):
     """向量数据库配置"""
+    backend: str = "chroma"
     persist_dir: str = "./data/chroma_db"
     collection_prefix: str = "anysql"
+    host: Optional[str] = None
+    port: Optional[int] = None
+    url: Optional[str] = None
+
+
+class StorageConfig(BaseModel):
+    """AnySQL 自身的系统数据存储配置"""
+    backend: str = "local"
+    database_url: Optional[str] = None
+
+
+class QueueConfig(BaseModel):
+    """后台任务队列配置"""
+    backend: str = "in_process"
+    redis_url: Optional[str] = None
 
 
 class ServerConfig(BaseModel):
@@ -84,7 +100,9 @@ class LoggingConfig(BaseModel):
 class AppConfig(BaseModel):
     """应用全局配置"""
     llm: LLMConfig = Field(default_factory=LLMConfig)
+    storage: StorageConfig = Field(default_factory=StorageConfig)
     vector_db: VectorDBConfig = Field(default_factory=VectorDBConfig)
+    queue: QueueConfig = Field(default_factory=QueueConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
     products: dict[str, ProductConfig] = Field(default_factory=dict)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)

@@ -2,6 +2,20 @@
 
 All notable changes to AnySQL are documented in this file.
 
+## [0.2.0] - 2026-05-12
+
+### Added
+
+- Added a 50-user service architecture document covering PostgreSQL, pgvector, Redis workers, durable jobs, and migration phases.
+- Added explicit `storage`, `queue`, and expanded `vector_db` configuration blocks.
+- Added production dependency group for PostgreSQL, SQLAlchemy, Alembic, Redis/RQ, and pgvector.
+- Added Chroma HTTP vector backend configuration support for service-mode Chroma deployments.
+
+### Changed
+
+- Documented local file/Chroma persistence as development mode rather than the target shared deployment architecture.
+- Updated the example server port to `8765`.
+
 ## [0.1.10] - 2026-05-12
 
 ### Added

@@ -34,13 +34,29 @@ class VectorEngine:
         persist_dir: str,
         collection_prefix: str,
         llm_client: LLMClient,
+        backend: str = "chroma",
+        host: str | None = None,
+        port: int | None = None,
     ):
         self.persist_dir = persist_dir
         self.prefix = collection_prefix
         self.llm = llm_client
+        self.backend = backend
 
-        self._client = chromadb.PersistentClient(path=persist_dir)
-        logger.info(f"VectorEngine 初始化: persist_dir={persist_dir}")
+        if backend == "chroma":
+            self._client = chromadb.PersistentClient(path=persist_dir)
+            logger.info(f"VectorEngine 初始化: backend=chroma, persist_dir={persist_dir}")
+        elif backend == "chroma_http":
+            if not host:
+                raise ValueError("vector_db.host is required when backend=chroma_http")
+            self._client = chromadb.HttpClient(host=host, port=port or 8000)
+            logger.info(f"VectorEngine 初始化: backend=chroma_http, host={host}, port={port or 8000}")
+        elif backend == "pgvector":
+            raise NotImplementedError(
+                "vector_db.backend=pgvector is the production target, but the repository layer is not implemented yet."
+            )
+        else:
+            raise ValueError(f"Unsupported vector_db.backend: {backend}")
 
     def _collection_name(self, product: str) -> str:
         return f"{self.prefix}_{product}"

@@ -12,12 +12,29 @@ llm:
   temperature: 0.3
 
 vector_db:
+  # local development: chroma
+  # shared service option: chroma_http
+  # production target: pgvector, after repository migration is complete
+  backend: "chroma"
   persist_dir: "./data/chroma_db"
   collection_prefix: "anysql"
+  host:
+  port:
+  url:
+
+storage:
+  # local is for development only. Use postgresql for shared deployments.
+  backend: "local"
+  database_url: "postgresql+psycopg://anysql:change-me@postgres:5432/anysql"
+
+queue:
+  # in_process is for development only. Use redis for shared deployments.
+  backend: "in_process"
+  redis_url: "redis://redis:6379/0"
 
 server:
   host: "127.0.0.1"
-  port: 8768
+  port: 8765
 
 products:
   demo:

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "anysql"
-version = "0.1.10"
+version = "0.2.0"
 description = "AI-assisted SQL asset analysis and natural-language search platform."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -30,6 +30,14 @@ dependencies = [
 [project.optional-dependencies]
 oracle = ["oracledb>=2.0.0"]
 dev = ["pytest>=8.0.0", "httpx>=0.28.0"]
+production = [
+  "psycopg[binary]>=3.2.0",
+  "sqlalchemy>=2.0.0",
+  "alembic>=1.14.0",
+  "redis>=5.0.0",
+  "rq>=2.0.0",
+  "pgvector>=0.3.0"
+]
 
 [tool.setuptools.packages.find]
 include = ["anysql*"]

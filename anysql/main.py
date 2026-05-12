@@ -52,7 +52,14 @@ async def lifespan(app: FastAPI):
         max_retries=config.llm.max_retries,
         temperature=config.llm.temperature,
     )
-    vector = VectorEngine(config.vector_db.persist_dir, config.vector_db.collection_prefix, llm)
+    vector = VectorEngine(
+        config.vector_db.persist_dir,
+        config.vector_db.collection_prefix,
+        llm,
+        backend=config.vector_db.backend,
+        host=config.vector_db.host,
+        port=config.vector_db.port,
+    )
     agent = AgentEngine(llm)
     pipeline = AnalysisPipeline(config, llm, vector, agent)
     
