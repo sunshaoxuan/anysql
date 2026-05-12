@@ -21,6 +21,7 @@ from anysql.storage.repositories import (
     MetadataRepository,
     ProductRepository,
     SQLKnowledgeRepository,
+    TableProfileRepository,
 )
 
 
@@ -61,8 +62,9 @@ async def _metadata_delta_sync(job_id: str, product_code: str) -> dict:
             jobs = JobRepository(session)
             metadata = MetadataRepository(session)
             total, changed = metadata.upsert_tables(product.id, table_data)
+            profiled = TableProfileRepository(session).rebuild_auto(product.id)
             indexed = await PGVectorRepository(session, llm, config.llm.embed_model).index_metadata(product.id)
-            result = {"table_count": total or (index or {}).get("table_count", 0), "changed": changed, "indexed_count": indexed}
+            result = {"table_count": total or (index or {}).get("table_count", 0), "changed": changed, "profiled_count": profiled, "indexed_count": indexed}
             jobs.mark_succeeded(job_id, result)
             return result
     except Exception as exc:
@@ -149,4 +151,3 @@ async def _embedding_rebuild(job_id: str, product_code: str) -> dict:
         raise
     finally:
         await llm.close()
-

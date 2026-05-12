@@ -12,7 +12,7 @@ from anysql.core.llm_client import LLMClient
 from anysql.models.schemas import AnalysisStatus, ProductUpsertRequest, SQLRecord
 from anysql.storage.database import Database
 from anysql.storage.pgvector_engine import PGVectorRepository
-from anysql.storage.repositories import MetadataRepository, ProductRepository, SQLKnowledgeRepository
+from anysql.storage.repositories import MetadataRepository, ProductRepository, SQLKnowledgeRepository, TableProfileRepository
 
 
 async def migrate(config_path: str | None = None, rebuild_embeddings: bool = True) -> dict:
@@ -83,6 +83,7 @@ async def migrate(config_path: str | None = None, rebuild_embeddings: bool = Tru
                     except Exception as exc:
                         report["errors"].append(f"{path}: {exc}")
                 total, _ = MetadataRepository(session).upsert_tables(product.id, table_data)
+                TableProfileRepository(session).rebuild_auto(product.id)
                 report["metadata_tables"] += total
                 imported_products.append((code, product.id))
         if rebuild_embeddings:

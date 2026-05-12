@@ -2,6 +2,26 @@
 
 All notable changes to AnySQL are documented in this file.
 
+## [0.4.0] - 2026-05-13
+
+### Added
+
+- Added database-backed table role catalog with deterministic domain/role profiling for Metadata tables.
+- Added product APIs to list, manually update, and rebuild table profiles.
+- Added Product UI controls for searching and editing table domain/role profiles.
+- Added intent policies for employee basic information, transfer records, and transfer check logs.
+
+### Changed
+
+- Assistant and generation Metadata retrieval now applies table role constraints before sending candidates to the LLM.
+- Metadata sync and local migration now rebuild automatic table profiles while preserving manual overrides.
+- Transfer record queries now prefer `DKIDO_R` / `DKIDO` and block check logs such as `XCIDOCHKLOG`.
+
+### Fixed
+
+- Prevented ordinary business queries from using log/work/IF/backup tables unless the intent explicitly allows them.
+- Removed unrequested bare parameter filters for all-record requests such as `WHERE CSHAINNO LIKE :1`.
+
 ## [0.3.3] - 2026-05-13
 
 ### Added

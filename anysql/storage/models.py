@@ -141,6 +141,21 @@ class MetadataColumn(Base, TimestampMixin):
     ordinal: Mapped[int] = mapped_column(Integer, default=0)
 
 
+class MetadataTableProfile(Base, TimestampMixin):
+    __tablename__ = "metadata_table_profiles"
+    __table_args__ = (UniqueConstraint("product_id", "table_name", name="uq_metadata_table_profile_product_name"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=new_id)
+    product_id: Mapped[str] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"), nullable=False, index=True)
+    table_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    domain: Mapped[str] = mapped_column(String(64), default="unknown", index=True)
+    role: Mapped[str] = mapped_column(String(64), default="unknown", index=True)
+    confidence: Mapped[float] = mapped_column(default=0.0)
+    reason: Mapped[str] = mapped_column(Text, default="")
+    source: Mapped[str] = mapped_column(String(32), default="auto", index=True)
+    updated_by: Mapped[str] = mapped_column(String(128), default="system")
+
+
 class SQLDraft(Base, TimestampMixin):
     __tablename__ = "sql_drafts"
 
@@ -216,4 +231,3 @@ class MetadataEmbedding(Base, TimestampMixin):
     document: Mapped[str] = mapped_column(Text, nullable=False)
     meta: Mapped[dict] = mapped_column(JSON, default=dict)
     embedding: Mapped[list[float]] = mapped_column(Vector(EMBEDDING_DIMENSION))
-

@@ -24,10 +24,12 @@ from anysql.models.schemas import (
     SQLStatement,
     StatementType,
 )
+from anysql.core.table_profiles import infer_table_profile
 from anysql.storage.models import (
     Job,
     KnowledgeAcceptance,
     MetadataColumn,
+    MetadataTableProfile,
     MetadataTable,
     Product,
     ProductDBConnection,
@@ -324,6 +326,96 @@ class MetadataRepository:
     def get_table(self, product_id: str, table_name: str) -> dict | None:
         row = self.session.scalar(select(MetadataTable).where(MetadataTable.product_id == product_id, MetadataTable.table_name == table_name.upper()))
         return row.raw if row else None
+
+
+class TableProfileRepository:
+    def __init__(self, session: Session):
+        self.session = session
+
+    def rebuild_auto(self, product_id: str) -> int:
+        count = 0
+        tables = self.session.scalars(select(MetadataTable).where(MetadataTable.product_id == product_id)).all()
+        for table in tables:
+            existing = self.get(product_id, table.table_name)
+            if existing and existing.source == "manual":
+                continue
+            columns = [
+                {"column_name": col.column_name, "comment": col.comment}
+                for col in self.session.scalars(select(MetadataColumn).where(MetadataColumn.metadata_table_id == table.id))
+            ]
+            inferred = infer_table_profile(table.table_name, table.comment, columns)
+            if not existing:
+                existing = MetadataTableProfile(product_id=product_id, table_name=table.table_name)
+                self.session.add(existing)
+            existing.domain = inferred.domain
+            existing.role = inferred.role
+            existing.confidence = inferred.confidence
+            existing.reason = inferred.reason
+            existing.source = "auto"
+            existing.updated_by = "system"
+            count += 1
+        self.session.flush()
+        return count
+
+    def get(self, product_id: str, table_name: str) -> MetadataTableProfile | None:
+        return self.session.scalar(
+            select(MetadataTableProfile).where(
+                MetadataTableProfile.product_id == product_id,
+                MetadataTableProfile.table_name == table_name.upper(),
+            )
+        )
+
+    def list(self, product_id: str, q: str = "", limit: int = 200) -> list[dict]:
+        stmt = (
+            select(MetadataTable, MetadataTableProfile)
+            .join(
+                MetadataTableProfile,
+                (MetadataTableProfile.product_id == MetadataTable.product_id)
+                & (MetadataTableProfile.table_name == MetadataTable.table_name),
+                isouter=True,
+            )
+            .where(MetadataTable.product_id == product_id)
+            .order_by(MetadataTable.table_name)
+            .limit(limit)
+        )
+        if q:
+            like = f"%{q.upper()}%"
+            stmt = stmt.where((MetadataTable.table_name.ilike(like)) | (MetadataTable.comment.ilike(f"%{q}%")))
+        rows = self.session.execute(stmt).all()
+        result = []
+        for table, profile in rows:
+            result.append(self.to_dict(table, profile))
+        return result
+
+    def update_manual(self, product_id: str, table_name: str, domain: str, role: str, updated_by: str = "system") -> dict:
+        table_name = table_name.upper()
+        table = self.session.scalar(select(MetadataTable).where(MetadataTable.product_id == product_id, MetadataTable.table_name == table_name))
+        if not table:
+            raise ValueError(f"Table not found: {table_name}")
+        profile = self.get(product_id, table_name)
+        if not profile:
+            profile = MetadataTableProfile(product_id=product_id, table_name=table_name)
+            self.session.add(profile)
+        profile.domain = domain or "unknown"
+        profile.role = role or "unknown"
+        profile.confidence = 1.0
+        profile.reason = "manual override"
+        profile.source = "manual"
+        profile.updated_by = updated_by
+        self.session.flush()
+        return self.to_dict(table, profile)
+
+    @staticmethod
+    def to_dict(table: MetadataTable, profile: MetadataTableProfile | None) -> dict:
+        return {
+            "table_name": table.table_name,
+            "comment": table.comment,
+            "domain": profile.domain if profile else "unknown",
+            "role": profile.role if profile else "unknown",
+            "confidence": float(profile.confidence or 0) if profile else 0,
+            "reason": profile.reason if profile else "",
+            "source": profile.source if profile else "auto",
+        }
 
 
 class JobRepository:

@@ -5,14 +5,18 @@ AnySQL API - SQL 辅助对话。
 from __future__ import annotations
 
 from datetime import datetime
+import re
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException
+from sqlalchemy import select
 
 from anysql.core.query_expansion import expand_query_for_metadata
-from anysql.core.sql_cleaner import clean_generated_sql
+from anysql.core.sql_cleaner import clean_generated_sql, strip_sql_comments
+from anysql.core.table_profiles import policy_for_intent, resolve_intent
 from anysql.models.schemas import AnalysisStatus, GeneratedSQL, SQLAssistantRequest, SQLAssistantResponse, SQLLearnRequest
 from anysql.storage.pgvector_engine import PGVectorRepository
+from anysql.storage.models import MetadataColumn, MetadataTable
 from anysql.storage.repositories import ProductRepository, SQLKnowledgeRepository
 
 router = APIRouter(prefix="/api/assistant", tags=["assistant"])
@@ -51,12 +55,17 @@ async def assist_sql(req: SQLAssistantRequest):
                 with storage.database.session() as search_session:
                     product = ProductRepository(search_session).get_by_code(req.product)
                     vector = PGVectorRepository(search_session, state["llm"], config.llm.embed_model)
-                    metadata_hits = await vector.search_metadata(query_ja, product.id, 10)
+                    vector_hits = await vector.search_metadata(query_ja, product.id, 10)
+                    text_hits = vector.search_metadata_text(f"{req.message} {query_ja}", product.id, 10)
+                    intent_hits = vector.search_metadata_by_intent(req.message, product.id, 8)
                     metadata_hits = _merge_metadata_hits(
-                        metadata_hits,
-                        vector.search_metadata_text(f"{req.message} {query_ja}", product.id, 10),
-                        vector.search_metadata_by_intent(req.message, product.id, 8),
+                        intent_hits,
+                        vector.apply_profile_policy(text_hits, req.message, product.id),
+                        vector.apply_profile_policy(vector_hits, req.message, product.id),
                     )
+                    metadata_hits = _restrict_intent_tables(metadata_hits, req.message)
+                    blocked_profiles = vector.blocked_profiles([*vector_hits, *text_hits], req.message, product.id)
+                    intent_name = resolve_intent(req.message)
                 generated = await _generate_sql_from_context(
                     state,
                     config,
@@ -70,6 +79,8 @@ async def assist_sql(req: SQLAssistantRequest):
                 )
                 generated.sql = clean_generated_sql(generated.sql, allow_aliases=req.use_aliases)
                 record = pipeline._draft_record(req.product, req.message, generated, allow_aliases=req.use_aliases)
+                _attach_profile_snapshot(record, intent_name, metadata_hits, blocked_profiles)
+                _apply_intent_sql_template(record, req.message)
                 mode, matches, learned = "revised", [], False
             else:
                 query_ja = expand_query_for_metadata(req.message)
@@ -77,12 +88,17 @@ async def assist_sql(req: SQLAssistantRequest):
                     product = ProductRepository(search_session).get_by_code(req.product)
                     vector = PGVectorRepository(search_session, state["llm"], config.llm.embed_model)
                     candidates = await vector.search(query_ja, req.product, req.top_k)
-                    metadata_hits = await vector.search_metadata(query_ja, product.id, 8)
+                    vector_hits = await vector.search_metadata(query_ja, product.id, 8)
+                    text_hits = vector.search_metadata_text(f"{req.message} {query_ja}", product.id, 10)
+                    intent_hits = vector.search_metadata_by_intent(req.message, product.id, 8)
                     metadata_hits = _merge_metadata_hits(
-                        metadata_hits,
-                        vector.search_metadata_text(f"{req.message} {query_ja}", product.id, 10),
-                        vector.search_metadata_by_intent(req.message, product.id, 8),
+                        intent_hits,
+                        vector.apply_profile_policy(text_hits, req.message, product.id),
+                        vector.apply_profile_policy(vector_hits, req.message, product.id),
                     )
+                    metadata_hits = _restrict_intent_tables(metadata_hits, req.message)
+                    blocked_profiles = vector.blocked_profiles([*vector_hits, *text_hits], req.message, product.id)
+                    intent_name = resolve_intent(req.message)
                 top_vector_score = max((item.score for item in candidates), default=0.0)
                 matches = []
                 if top_vector_score >= max(0.68, req.match_threshold - 0.08):
@@ -111,10 +127,14 @@ async def assist_sql(req: SQLAssistantRequest):
                     )
                     generated.sql = clean_generated_sql(generated.sql, allow_aliases=req.use_aliases)
                     record = pipeline._draft_record(req.product, req.message, generated, allow_aliases=req.use_aliases)
+                    _attach_profile_snapshot(record, intent_name, metadata_hits, blocked_profiles)
+                    _apply_intent_sql_template(record, req.message)
                     mode, learned = "generated", False
             with storage.database.session() as session:
                 product = ProductRepository(session).get_by_code(req.product)
                 if mode != "matched":
+                    _repair_unknown_columns(session, product.id, record)
+                    _attach_column_validation(session, product.id, record)
                     SQLKnowledgeRepository(session).save_draft(product.id, req.message, record, req.session_id)
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e)) from e
@@ -220,12 +240,164 @@ async def learn_sql(req: SQLLearnRequest):
 def _merge_metadata_hits(primary: list[dict], secondary: list[dict], intent: list[dict] | None = None) -> list[dict]:
     merged: list[dict] = []
     seen: set[str] = set()
-    for item in [*(intent or []), *secondary, *primary]:
+    for item in [*primary, *secondary, *(intent or [])]:
         table = str(item.get("table") or item.get("id") or "").upper()
         if table and table not in seen:
             seen.add(table)
             merged.append(item)
     return sorted(merged, key=lambda item: float(item.get("score") or 0), reverse=True)[:12]
+
+
+def _restrict_intent_tables(metadata_hits: list[dict], requirement: str) -> list[dict]:
+    intent = resolve_intent(requirement)
+    text = requirement or ""
+    if intent == "transfer_records":
+        preferred = {"DKIDO_R", "DKIDO"}
+        if any(word in text for word in ("非常勤", "非職", "非职", "パート", "part-time", "parttime")):
+            preferred.update({"DHJKIDO_R", "DHJKIDO"})
+        restricted = [item for item in metadata_hits if str(item.get("table", "")).upper() in preferred]
+        if restricted:
+            return restricted[:4]
+    if intent == "employee_basic_name":
+        preferred = {"DJND0110", "MAST_EMPLOYEES", "MAST_EMPLOYEES2"}
+        restricted = [item for item in metadata_hits if str(item.get("table", "")).upper() in preferred]
+        if restricted:
+            return restricted[:3]
+    if intent == "transfer_check_log":
+        restricted = [item for item in metadata_hits if str(item.get("table", "")).upper() == "XCIDOCHKLOG"]
+        if restricted:
+            return restricted[:1]
+    return metadata_hits
+
+
+def _apply_intent_sql_template(record, requirement: str) -> None:
+    intent = resolve_intent(requirement)
+    text = requirement or ""
+    if intent != "transfer_records":
+        return
+    if not any(word in text.lower() for word in ("所有", "全部", "全件", "すべて", "all")):
+        return
+    table = "DKIDO"
+    if any(word in text for word in ("履歴", "历史", "歷史", "累積")) or not any(word in text for word in ("当前", "現在", "未累積")):
+        table = "DKIDO_R"
+    if any(word in text for word in ("非常勤", "非職", "非职", "パート", "part-time", "parttime")):
+        table = "DHJKIDO_R" if table.endswith("_R") else "DHJKIDO"
+    record.statement.raw_sql = (
+        "-- AnySQL: 異動履歴を取得します。\n"
+        "-- 条件: 必要に応じて職員番号や氏名のWHERE条件を追加してください。\n"
+        f"SELECT *\nFROM {table};"
+    )
+    record.statement.tables = [table]
+
+
+def _attach_profile_snapshot(record, intent_name: str, metadata_hits: list[dict], blocked_profiles: list[dict]) -> None:
+    policy = policy_for_intent(intent_name)
+    selected_profiles = [item.get("profile") for item in metadata_hits if item.get("profile")]
+    warnings = []
+    if policy:
+        used = {table.upper() for table in record.statement.tables}
+        selected = {str(profile.get("table_name", "")).upper(): profile for profile in selected_profiles}
+        blocked = {str(profile.get("table_name", "")).upper(): profile for profile in blocked_profiles}
+        for table in used:
+            profile = selected.get(table)
+            if profile and profile.get("role") in policy.blocked_roles:
+                warnings.append(f"{table} role={profile.get('role')} is blocked for intent={intent_name}")
+            elif table in blocked:
+                warnings.append(f"{table} role={blocked[table].get('role')} is blocked for intent={intent_name}")
+            elif table not in selected:
+                warnings.append(f"{table} was not in the allowed table candidates for intent={intent_name}")
+    record.metadata_snapshot = {
+        **(record.metadata_snapshot or {}),
+        "intent": intent_name,
+        "selected_table_profiles": selected_profiles,
+        "blocked_table_profiles": blocked_profiles,
+        "validation_warnings": warnings,
+    }
+
+
+def _attach_column_validation(session, product_id: str, record) -> None:
+    tables = [table.upper() for table in record.statement.tables]
+    if not tables:
+        return
+    allowed: set[str] = set()
+    for table_name in tables:
+        table = session.scalar(select(MetadataTable).where(MetadataTable.product_id == product_id, MetadataTable.table_name == table_name))
+        if table:
+            allowed.update(
+                col.column_name.upper()
+                for col in session.scalars(select(MetadataColumn).where(MetadataColumn.metadata_table_id == table.id))
+            )
+    if not allowed:
+        return
+    keywords = {
+        "SELECT", "FROM", "WHERE", "AND", "OR", "LIKE", "BETWEEN", "IN", "IS", "NULL", "NOT", "ORDER", "BY",
+        "GROUP", "HAVING", "UNION", "ALL", "DISTINCT", "AS", "ON", "JOIN", "INNER", "LEFT", "RIGHT", "TO_DATE",
+        "ASC", "DESC",
+    }
+    sql = re.sub(r":[A-Za-z_][A-Za-z0-9_]*|:[0-9]+", "", strip_sql_comments(record.statement.raw_sql))
+    identifiers = {
+        token.upper()
+        for token in re.findall(r"\b[A-Za-z_][A-Za-z0-9_$#]*\b", sql)
+        if token.upper() not in keywords and token.upper() not in tables and not token.startswith("_")
+    }
+    unknown = sorted(token for token in identifiers if token not in allowed)
+    if unknown:
+        snapshot = record.metadata_snapshot or {}
+        warnings = list(snapshot.get("validation_warnings") or [])
+        warnings.append(f"Unknown columns for selected metadata: {', '.join(unknown[:8])}")
+        snapshot["validation_warnings"] = warnings
+        record.metadata_snapshot = snapshot
+
+
+def _repair_unknown_columns(session, product_id: str, record) -> None:
+    tables = [table.upper() for table in record.statement.tables]
+    if not tables:
+        return
+    allowed: set[str] = set()
+    for table_name in tables:
+        table = session.scalar(select(MetadataTable).where(MetadataTable.product_id == product_id, MetadataTable.table_name == table_name))
+        if table:
+            allowed.update(
+                col.column_name.upper()
+                for col in session.scalars(select(MetadataColumn).where(MetadataColumn.metadata_table_id == table.id))
+            )
+    if not allowed:
+        return
+    sql = record.statement.raw_sql
+    replacements: dict[str, str] = {}
+    for token in set(re.findall(r"\b[A-Za-z_][A-Za-z0-9_$#]*\b", strip_sql_comments(sql))):
+        upper = token.upper()
+        if upper in allowed or upper in tables:
+            continue
+        match = _best_column_repair(upper, allowed)
+        if match:
+            replacements[upper] = match
+    for old, new in replacements.items():
+        sql = re.sub(rf"\b{re.escape(old)}\b", new, sql, flags=re.IGNORECASE)
+    if replacements:
+        record.statement.raw_sql = sql
+
+
+def _best_column_repair(token: str, allowed: set[str]) -> str | None:
+    suffix_matches = sorted(col for col in allowed if col.endswith(f"_{token}") or col.endswith(token))
+    if len(suffix_matches) == 1:
+        return suffix_matches[0]
+    known_synonyms = {
+        "HTREINGB_DTE": ("DHTREINGB_DTE",),
+        "IDO_CDE": ("NNMN_IDO_CDE", "KYU_IDO_CDE", "GOHO_IDO_CDE"),
+        "IDO_NME": ("NNMN_IDO_NME", "KYU_IDO_NME", "GOHO_IDO_NME"),
+        "ERRMSG": ("CMSG",),
+        "ERROR_MSG": ("CMSG",),
+        "CERRWRN_MSG": ("CMSG",),
+        "MESSAGE": ("CMSG",),
+        "MSG": ("CMSG",),
+        "ERROR_CODE": ("NMSGSHUB",),
+        "NERRWRN_FLG": ("NMSGSHUB",),
+    }
+    for candidate in known_synonyms.get(token, ()):
+        if candidate in allowed:
+            return candidate
+    return None
 
 
 async def _generate_sql_from_context(
@@ -250,6 +422,7 @@ async def _generate_sql_from_context(
     ) or "No metadata hits."
     allowed_tables = ", ".join(dict.fromkeys(str(m.get("table", "")).upper() for m in metadata_hits if m.get("table"))) or "No allowed tables."
     domain_hint = _domain_hint(requirement)
+    profile_rule = _profile_rule(requirement)
     alias_rule = "SELECT 列别名不要生成。" if not allow_aliases else "SELECT 列别名如确实需要只能使用 ASCII，禁止中文/日文别名。"
     revise_block = f"\n当前 SQL（只能作为上一轮错误草稿参考，不得盲目保留错误表名）:\n{current_sql}\n" if current_sql else ""
     prompt = f"""你要为产品 {product_code} 生成或修正一段满足业务需求的 Oracle SQL。
@@ -272,6 +445,9 @@ async def _generate_sql_from_context(
 本次需求的表选择约束:
 {domain_hint}
 
+表角色约束:
+{profile_rule}
+
 相似SQL知识:
 {chr(10).join(examples) if examples else "No similar SQL knowledge found."}
 
@@ -285,7 +461,8 @@ async def _generate_sql_from_context(
 7. SQL 字符串字面量必须直接使用单引号，并保留用户输入的实际值；不要照抄示例值。
 8. SQL 注释只能使用日语；禁止中文注释。{alias_rule}
 9. 在 SQL 开头生成 1-2 行 -- 注释，说明用途和参数。
-10. 输出 JSON，字段必须符合 GeneratedSQL schema。
+10. 绑定参数名只能使用 ASCII 字母、数字和下划线，例如 :employee_no，禁止中文/日文参数名。
+11. 输出 JSON，字段必须符合 GeneratedSQL schema。
 """
     return await state["agent"].execute_task(prompt, GeneratedSQL)
 
@@ -297,4 +474,19 @@ def _domain_hint(requirement: str) -> str:
     )
     if asks_basic_employee:
         return "本次看起来是员工/职员基本信息查询。请让 LLM 在候选表中综合判断最贴近“基本情報/給与基本情報/氏名/職員番号”的表和字段，禁止硬编码固定表。"
+    if resolve_intent(text) == "transfer_records":
+        return "本次是异动记录查询。普通异动记录优先使用 DKIDO_R / DKIDO；只有用户明确要求非常勤/非职时才使用 DHJKIDO_R / DHJKIDO。"
+    if resolve_intent(text) == "transfer_check_log":
+        return "本次是异动检查日志/错误消息查询，可以使用 XCIDOCHKLOG。"
     return "按向量候选、模糊文本候选和业务意图综合选择最贴近的表字段；不要被低匹配 SQL 示例带偏。"
+
+
+def _profile_rule(requirement: str) -> str:
+    intent = resolve_intent(requirement)
+    if intent == "transfer_records":
+        return "业务查询不得使用 log/work/if_staging/backup 表。XCIDOCHKLOG 只能用于异动检查日志/错误消息，不得用于普通异动记录。"
+    if intent == "transfer_check_log":
+        return "本意图允许 log 表；优先使用 XCIDOCHKLOG。"
+    if intent == "employee_basic_name":
+        return "基本信息查询只允许 master 表。不得使用給与/ワーク/IF/log/backup 表。"
+    return "未知意图下避免使用 log/work/if_staging/backup 表，除非用户明确要求日志、检查、接口或临时数据。"

@@ -11,7 +11,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 from anysql.config import DatabaseConfig, ProductConfig, save_config
 from anysql.logger import logger
 from anysql.models.schemas import ProductInfo, ProductUpsertRequest
-from anysql.storage.repositories import JobRepository, ProductRepository, SQLKnowledgeRepository
+from anysql.storage.repositories import JobRepository, ProductRepository, SQLKnowledgeRepository, TableProfileRepository
 
 router = APIRouter(prefix="/api/products", tags=["products"])
 
@@ -210,6 +210,54 @@ async def delete_product(product_id: str):
     save_config(config)
     logger.info(f"产品配置已删除: {product_id}")
     return {"status": "deleted", "id": product_id}
+
+
+@router.get("/{product_id}/table-profiles")
+async def list_table_profiles(product_id: str, q: str = "", limit: int = 200):
+    state = _get_app_state()
+    storage = state.get("storage")
+    if not (storage and storage.is_database_mode):
+        return []
+    with storage.database.session() as session:
+        product = ProductRepository(session).get_by_code(product_id)
+        if not product:
+            raise HTTPException(status_code=404, detail=f"产品不存在: {product_id}")
+        return TableProfileRepository(session).list(product.id, q=q, limit=limit)
+
+
+@router.patch("/{product_id}/table-profiles/{table_name}")
+async def update_table_profile(product_id: str, table_name: str, payload: dict):
+    state = _get_app_state()
+    storage = state.get("storage")
+    if not (storage and storage.is_database_mode):
+        raise HTTPException(status_code=400, detail="table profiles require database mode")
+    with storage.database.session() as session:
+        product = ProductRepository(session).get_by_code(product_id)
+        if not product:
+            raise HTTPException(status_code=404, detail=f"产品不存在: {product_id}")
+        try:
+            return TableProfileRepository(session).update_manual(
+                product.id,
+                table_name,
+                str(payload.get("domain") or "unknown"),
+                str(payload.get("role") or "unknown"),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/{product_id}/table-profiles/rebuild")
+async def rebuild_table_profiles(product_id: str):
+    state = _get_app_state()
+    storage = state.get("storage")
+    if not (storage and storage.is_database_mode):
+        raise HTTPException(status_code=400, detail="table profiles require database mode")
+    with storage.database.session() as session:
+        product = ProductRepository(session).get_by_code(product_id)
+        if not product:
+            raise HTTPException(status_code=404, detail=f"产品不存在: {product_id}")
+        count = TableProfileRepository(session).rebuild_auto(product.id)
+        return {"status": "rebuilt", "profiled_count": count}
 
 
 @router.get("/{product_id}/sqls")

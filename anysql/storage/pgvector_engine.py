@@ -11,8 +11,9 @@ from sqlalchemy import delete, select, text
 from sqlalchemy.orm import Session
 
 from anysql.core.vector_engine import VectorEngine
+from anysql.core.table_profiles import is_table_allowed, policy_for_intent, resolve_intent, table_policy_score
 from anysql.models.schemas import SQLRecord, SearchResult
-from anysql.storage.models import MetadataColumn, MetadataEmbedding, MetadataTable, Product, SQLEmbedding
+from anysql.storage.models import MetadataColumn, MetadataEmbedding, MetadataTable, MetadataTableProfile, Product, SQLEmbedding
 
 
 class PGVectorRepository:
@@ -234,22 +235,21 @@ class PGVectorRepository:
         return results
 
     def search_metadata_by_intent(self, requirement: str, product_id: str, top_k: int = 8) -> list[dict]:
-        intent = _metadata_intent(requirement)
-        if intent != "employee_basic_name":
+        intent = resolve_intent(requirement)
+        policy = policy_for_intent(intent)
+        if not policy:
             return []
         rows = self.session.execute(text("""
             SELECT mt.id, mt.table_name, mt.comment,
-                   BOOL_OR(mc.column_name ~* '(C?NAME|KANJI|KANA|MEI|SHIMEI|SIMEI)'
-                           OR COALESCE(mc.comment, '') LIKE '%氏名%') AS has_name,
-                   BOOL_OR(mc.column_name ~* '(SHAIN|EMPLOYEE|CEMPLOYEE)'
-                           OR COALESCE(mc.comment, '') LIKE '%職員番号%'
-                           OR COALESCE(mc.comment, '') LIKE '%社員番号%') AS has_employee_no,
                    STRING_AGG(
                        DISTINCT CASE
-                           WHEN mc.column_name ~* '(C?NAME|KANJI|KANA|MEI|SHIMEI|SIMEI|SHAIN|EMPLOYEE|CEMPLOYEE)'
+                           WHEN mc.column_name ~* '(C?NAME|KANJI|KANA|MEI|SHIMEI|SIMEI|SHAIN|EMPLOYEE|CEMPLOYEE|HTRE|IDO|NNMN)'
                                 OR COALESCE(mc.comment, '') LIKE '%氏名%'
                                 OR COALESCE(mc.comment, '') LIKE '%職員番号%'
                                 OR COALESCE(mc.comment, '') LIKE '%社員番号%'
+                                OR COALESCE(mc.comment, '') LIKE '%異動%'
+                                OR COALESCE(mc.comment, '') LIKE '%任免%'
+                                OR COALESCE(mc.comment, '') LIKE '%発令%'
                            THEN mc.column_name || ':' || COALESCE(mc.comment, '')
                            ELSE NULL
                        END,
@@ -257,33 +257,92 @@ class PGVectorRepository:
                    ) AS matched_columns
             FROM metadata_tables mt
             JOIN metadata_columns mc ON mc.metadata_table_id = mt.id
+            JOIN metadata_table_profiles mp ON mp.product_id = mt.product_id AND mp.table_name = mt.table_name
             WHERE mt.product_id = :product_id
+              AND mp.role = ANY(:allowed_roles)
+              AND NOT (mp.role = ANY(:blocked_roles))
+              AND (:domain = 'unknown' OR mp.domain = :domain)
             GROUP BY mt.id, mt.table_name, mt.comment
-            HAVING BOOL_OR(mc.column_name ~* '(C?NAME|KANJI|KANA|MEI|SHIMEI|SIMEI)'
-                           OR COALESCE(mc.comment, '') LIKE '%氏名%')
-               AND BOOL_OR(mc.column_name ~* '(SHAIN|EMPLOYEE|CEMPLOYEE)'
-                           OR COALESCE(mc.comment, '') LIKE '%職員番号%'
-                           OR COALESCE(mc.comment, '') LIKE '%社員番号%')
-        """), {"product_id": product_id}).mappings().all()
+        """), {
+            "product_id": product_id,
+            "allowed_roles": list(policy.allowed_roles),
+            "blocked_roles": list(policy.blocked_roles),
+            "domain": policy.domain,
+        }).mappings().all()
         scored: list[dict] = []
         for row in rows:
             table_name = str(row["table_name"] or "")
             comment = str(row["comment"] or "")
-            score = _employee_basic_table_score(table_name, comment)
+            profile = self._profile(product_id, table_name)
+            score = 0.6 + table_policy_score(table_name, profile, policy)
             if score <= 0:
                 continue
             table = self.session.get(MetadataTable, row["id"])
             document = self._metadata_doc(table) if table else f"Table: {table_name}\nComment: {comment}"
             if row["matched_columns"]:
                 document = f"{document}\nIntent matched columns:\n{row['matched_columns']}"
+            if profile:
+                document = f"{document}\nTable profile: domain={profile.domain}, role={profile.role}, source={profile.source}, reason={profile.reason}"
             scored.append({
                 "id": table_name,
                 "table": table_name,
-                "score": round(min(0.98, score), 4),
+                "score": round(score, 4),
                 "document": document,
+                "profile": self._profile_dict(profile),
                 "source": "intent_rerank",
             })
         return sorted(scored, key=lambda item: (-float(item["score"]), str(item["table"])))[:top_k]
+
+    def apply_profile_policy(self, hits: list[dict], requirement: str, product_id: str) -> list[dict]:
+        intent = resolve_intent(requirement)
+        policy = policy_for_intent(intent)
+        adjusted: list[dict] = []
+        for item in hits:
+            table_name = str(item.get("table") or item.get("id") or "").upper()
+            profile = self._profile(product_id, table_name)
+            if policy and profile and not is_table_allowed(profile, policy):
+                continue
+            score = float(item.get("score") or 0) + table_policy_score(table_name, profile, policy)
+            new_item = {**item, "score": round(max(0, min(1, score)), 4), "profile": self._profile_dict(profile)}
+            if profile and "Table profile:" not in str(new_item.get("document", "")):
+                new_item["document"] = f"{new_item.get('document', '')}\nTable profile: domain={profile.domain}, role={profile.role}, source={profile.source}, reason={profile.reason}"
+            adjusted.append(new_item)
+        return sorted(adjusted, key=lambda row: (-float(row.get("score") or 0), str(row.get("table") or "")))
+
+    def blocked_profiles(self, hits: list[dict], requirement: str, product_id: str) -> list[dict]:
+        policy = policy_for_intent(resolve_intent(requirement))
+        if not policy:
+            return []
+        blocked = []
+        seen: set[str] = set()
+        for item in hits:
+            table_name = str(item.get("table") or item.get("id") or "").upper()
+            if table_name in seen:
+                continue
+            seen.add(table_name)
+            profile = self._profile(product_id, table_name)
+            if profile and not is_table_allowed(profile, policy):
+                blocked.append(self._profile_dict(profile))
+        return blocked
+
+    def _profile(self, product_id: str, table_name: str) -> MetadataTableProfile | None:
+        return self.session.scalar(select(MetadataTableProfile).where(
+            MetadataTableProfile.product_id == product_id,
+            MetadataTableProfile.table_name == table_name.upper(),
+        ))
+
+    @staticmethod
+    def _profile_dict(profile: MetadataTableProfile | None) -> dict | None:
+        if not profile:
+            return None
+        return {
+            "table_name": profile.table_name,
+            "domain": profile.domain,
+            "role": profile.role,
+            "confidence": float(profile.confidence or 0),
+            "reason": profile.reason,
+            "source": profile.source,
+        }
 
 
 def _tokenize_query(query: str) -> list[str]:

@@ -39,7 +39,7 @@ def preserve_requirement_literal(sql: str, requirement: str, allow_aliases: bool
     values = re.findall(r"[\"“”'‘’]([^\"“”'‘’]{1,40})[\"“”'‘’]", str(requirement or ""))
     value = next((item.strip() for item in values if item.strip()), "")
     if not value:
-        return text
+        return _remove_unrequested_parameter_filters(text, requirement)
     escaped = value.replace("'", "''")
     text = re.sub(
         r"LIKE\s+'(?:\[[^'\]]+\]|:[A-Za-z0-9_]+|:[0-9]+)%'",
@@ -116,6 +116,23 @@ def preserve_requirement_literal(sql: str, requirement: str, allow_aliases: bool
             flags=re.IGNORECASE,
         )
         text = re.sub(r"\n\s+(?:AND|OR)\s+[^\n;]*\$_PARAM_(?!NAME|MEI|SHIMEI)[^\n;]*", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s+;", ";", text.rstrip())
+    text = re.sub(r"\s+;", ";", text.rstrip())
+    text = re.sub(r"\s+;", ";", text.rstrip())
+    return f"{text.rstrip().rstrip(';')};" if text else ""
+
+
+def _remove_unrequested_parameter_filters(sql: str, requirement: str) -> str:
+    req = requirement or ""
+    if not any(word in req for word in ("所有", "全部", "全件", "すべて", "all")):
+        return sql
+    text = re.sub(
+        r"\n?WHERE\s+[\s\S]*?(?=(?:\nGROUP\s+BY|\nORDER\s+BY|\nUNION\b|;|$))",
+        "",
+        sql,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(r"\s+;", ";", text.rstrip())
     return f"{text.rstrip().rstrip(';')};" if text else ""
 
 

@@ -206,6 +206,8 @@ function renderRecord(response) {
     const record = response.record;
     const analysis = record.analysis || {};
     const stmt = record.statement || {};
+    const snapshot = record.metadata_snapshot || {};
+    const warnings = snapshot.validation_warnings || [];
     currentSqlId = stmt.id;
     currentSql = decodeHtmlEntities(stmt.raw_sql || '');
 
@@ -235,7 +237,8 @@ function renderRecord(response) {
         </div>
         <h3>${escapeHtml(analysis.summary || 'SQL')}</h3>
         <p>${escapeHtml((analysis.business_context || []).join(' / '))}</p>
-        ${response.learned || response.mode === 'matched' ? '' : `<button class="btn btn-primary icon-btn" onclick="acceptCurrentSql(this)" title="${escapeHtml(t('accept'))}"><i class="fas fa-thumbs-up"></i></button>`}
+        ${warnings.length ? `<p class="side-muted">${escapeHtml(warnings.join(' / '))}</p>` : ''}
+        ${response.learned || response.mode === 'matched' || warnings.length ? '' : `<button class="btn btn-primary icon-btn" onclick="acceptCurrentSql(this)" title="${escapeHtml(t('accept'))}"><i class="fas fa-thumbs-up"></i></button>`}
     `);
 }
 

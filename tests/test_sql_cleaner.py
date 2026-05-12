@@ -115,3 +115,13 @@ def test_preserve_requirement_literal_replaces_bare_name_parameter():
     assert preserve_requirement_literal(sql, "查出所有姓“丰田”的人的基本信息") == (
         "SELECT CSHAINNO, CNAMEKNJ FROM DJND0110 WHERE CNAMEKNJ LIKE '丰田%';"
     )
+
+
+def test_preserve_requirement_literal_removes_unrequested_parameter_filter_for_all_records():
+    sql = "SELECT CSHAINNO, HTREINGB_DTE FROM DKIDO_R WHERE CSHAINNO LIKE :1"
+    assert preserve_requirement_literal(sql, "查所有的异动记录") == "SELECT CSHAINNO, HTREINGB_DTE FROM DKIDO_R;"
+
+
+def test_preserve_requirement_literal_removes_generated_literal_filters_for_all_records():
+    sql = "SELECT CSHAINNO, HTREINGB_DTE FROM DKIDO_R WHERE CSHAINNO = '123456' AND HTREINGB_DTE BETWEEN '202001' AND '202312'"
+    assert preserve_requirement_literal(sql, "查所有的异动记录") == "SELECT CSHAINNO, HTREINGB_DTE FROM DKIDO_R;"

@@ -418,6 +418,43 @@ body {
     height: 16px;
 }
 
+.profile-panel {
+    margin-top: 1rem;
+    border-top: 1px solid var(--border);
+    padding-top: 1rem;
+}
+
+.profile-actions {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    gap: 0.5rem;
+    margin: 0.75rem 0;
+}
+
+.profile-list {
+    display: grid;
+    gap: 0.5rem;
+    max-height: 420px;
+    overflow: auto;
+}
+
+.profile-row {
+    display: grid;
+    grid-template-columns: minmax(260px, 1fr) 140px 150px auto;
+    gap: 0.5rem;
+    align-items: center;
+    padding: 0.65rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-sub);
+}
+
+.profile-row small {
+    display: block;
+    color: var(--text-sub);
+    margin-top: 0.2rem;
+}
+
 .sql-stage {
     min-height: 0;
     overflow: hidden;

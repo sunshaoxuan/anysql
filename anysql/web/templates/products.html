@@ -50,6 +50,16 @@
                     <button type="button" class="btn btn-outline icon-btn" onclick="newProduct()" data-i18n-title="clear" title="クリア"><i class="fas fa-eraser"></i></button>
                 </div>
             </form>
+
+            <div class="profile-panel">
+                <div class="side-label" data-i18n="tableProfiles">表角色</div>
+                <div class="profile-actions">
+                    <input id="profileSearch" data-i18n-placeholder="tableProfileSearch" placeholder="テーブル検索">
+                    <button type="button" class="btn btn-outline icon-btn" onclick="loadTableProfiles()" data-i18n-title="search" title="検索"><i class="fas fa-magnifying-glass"></i></button>
+                    <button type="button" class="btn btn-outline icon-btn" onclick="rebuildProfiles(this)" data-i18n-title="rebuildProfiles" title="再構築"><i class="fas fa-layer-group"></i></button>
+                </div>
+                <div id="tableProfiles" class="profile-list"></div>
+            </div>
         </section>
     </div>
 </div>
@@ -59,6 +69,7 @@
 <script>
 let products = [];
 let editingPhysicalId = null;
+let tableProfiles = [];
 
 function fillForm(product = {}) {
     const form = document.getElementById('productForm');
@@ -114,6 +125,7 @@ function editProduct(physicalId) {
         database_username: p.database_username || '',
         database_password: p.database_password || ''
     });
+    loadTableProfiles();
 }
 
 function togglePassword(btn) {
@@ -188,6 +200,78 @@ async function syncCurrentProduct(btn) {
     const result = await res.json();
     alert(`${t('syncMetadata')}: ${result.status}`);
 }
+
+async function loadTableProfiles() {
+    const code = document.getElementById('productForm').elements.code.value;
+    if (!code) return;
+    const q = document.getElementById('profileSearch').value || '';
+    const res = await fetch(`/api/products/${encodeURIComponent(code)}/table-profiles?q=${encodeURIComponent(q)}&limit=80`);
+    if (!res.ok) {
+        document.getElementById('tableProfiles').innerHTML = '';
+        return;
+    }
+    tableProfiles = await res.json();
+    renderTableProfiles();
+}
+
+function renderTableProfiles() {
+    const el = document.getElementById('tableProfiles');
+    el.innerHTML = tableProfiles.map(p => `
+        <div class="profile-row">
+            <div>
+                <strong>${escapeHtml(p.table_name)}</strong>
+                <small>${escapeHtml(p.comment || '')}</small>
+                <small>${escapeHtml(p.source)} / ${Math.round((p.confidence || 0) * 100)}% / ${escapeHtml(p.reason || '')}</small>
+            </div>
+            <select data-table="${escapeHtml(p.table_name)}" data-field="domain">
+                ${['unknown','employee','transfer','payroll','organization'].map(v => `<option value="${v}" ${p.domain === v ? 'selected' : ''}>${v}</option>`).join('')}
+            </select>
+            <select data-table="${escapeHtml(p.table_name)}" data-field="role">
+                ${['unknown','business_fact','history_fact','master','log','work','if_staging','backup','config'].map(v => `<option value="${v}" ${p.role === v ? 'selected' : ''}>${v}</option>`).join('')}
+            </select>
+            <button type="button" class="btn btn-outline icon-btn" onclick="saveProfile('${escapeHtml(p.table_name)}')" data-i18n-title="save" title="保存"><i class="fas fa-floppy-disk"></i></button>
+        </div>
+    `).join('');
+}
+
+async function saveProfile(tableName) {
+    const code = document.getElementById('productForm').elements.code.value;
+    const domain = document.querySelector(`[data-table="${CSS.escape(tableName)}"][data-field="domain"]`).value;
+    const role = document.querySelector(`[data-table="${CSS.escape(tableName)}"][data-field="role"]`).value;
+    const res = await fetch(`/api/products/${encodeURIComponent(code)}/table-profiles/${encodeURIComponent(tableName)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ domain, role })
+    });
+    if (!res.ok) {
+        alert(await res.text());
+        return;
+    }
+    await loadTableProfiles();
+}
+
+async function rebuildProfiles(btn) {
+    const code = document.getElementById('productForm').elements.code.value;
+    if (!code) return;
+    const original = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+    const res = await fetch(`/api/products/${encodeURIComponent(code)}/table-profiles/rebuild`, { method: 'POST' });
+    btn.disabled = false;
+    btn.innerHTML = original;
+    if (!res.ok) {
+        alert(await res.text());
+        return;
+    }
+    await loadTableProfiles();
+}
+
+document.getElementById('profileSearch').addEventListener('keydown', event => {
+    if (event.key === 'Enter') {
+        event.preventDefault();
+        loadTableProfiles();
+    }
+});
 
 loadProducts();
 </script>
