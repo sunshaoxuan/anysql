@@ -1,0 +1,123 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<div class="app-container" style="max-width: 1000px;">
+    <nav style="margin-bottom: 2rem;">
+        <a href="javascript:history.back()" style="color: var(--accent); text-decoration: none; font-size: 0.9rem; display: flex; align-items: center; gap: 0.5rem;">
+            <i class="fas fa-arrow-left"></i> 検索結果に戻る
+        </a>
+    </nav>
+
+    <div class="card" style="margin-bottom: 2.5rem; padding: 2.5rem;">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1.5rem;">
+            {% if record.analysis %}
+                <div class="badge badge-green">Analyzed by AI</div>
+            {% else %}
+                <div class="badge" style="background: #f1f5f9; color: #64748b;">Pending Analysis</div>
+            {% endif %}
+            <div style="color: var(--text-sub); font-size: 0.85rem;">ID: {{ record.statement.id }}</div>
+        </div>
+
+        {% if record.analysis %}
+            <h1 style="font-size: 2.25rem; font-weight: 700; margin-bottom: 1rem; color: var(--text-main);">
+                {{ record.analysis.summary }}
+            </h1>
+            <div style="display: flex; gap: 0.75rem; margin-bottom: 2.5rem;">
+                {% for cat in record.analysis.category %}
+                <span class="badge badge-blue">{{ cat }}</span>
+                {% endfor %}
+            </div>
+        {% else %}
+            <h1 style="font-size: 1.75rem; font-weight: 700; margin-bottom: 2.5rem; color: var(--text-main);">
+                SQL ステートメント詳細
+            </h1>
+        {% endif %}
+
+        <div style="display: grid; grid-template-columns: {% if record.analysis %}2fr 1fr{% else %}1fr{% endif %}; gap: 3rem;">
+            <div>
+                <section style="margin-bottom: 2.5rem;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem;">
+                        <h2 style="font-size: 1.1rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-sub); margin: 0;">
+                            SQL クエリ
+                        </h2>
+                        <button onclick="copySQLFallback()" id="copyBtn" class="btn btn-outline" style="font-size: 0.75rem; padding: 0.4rem 0.9rem; border-radius: 6px; cursor: pointer;">
+                            <i class="far fa-copy"></i> Copy SQL
+                        </button>
+                    </div>
+                    <div style="position: relative;">
+                        <pre class="code-block" style="background: var(--bg-sub); padding: 1.5rem; border-radius: 8px; border: 1px solid var(--border); overflow-x: auto; margin: 0; line-height: 1.6; font-family: 'Fira Code', monospace;"><code id="sqlSource">{{ record.statement.raw_sql }}</code></pre>
+                    </div>
+                </section>
+
+                {% if record.analysis %}
+                <section>
+                    <h2 style="font-size: 1.1rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-sub); margin-bottom: 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem;">
+                        利用シーン / 業務文脈
+                    </h2>
+                    <ul style="list-style: none; display: grid; gap: 0.75rem;">
+                        {% for ctx in record.analysis.business_context %}
+                        <li style="display: flex; align-items: flex-start; gap: 0.75rem;">
+                            <i class="fas fa-check-circle" style="color: var(--success); margin-top: 0.3rem;"></i>
+                            <span>{{ ctx }}</span>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </section>
+                {% endif %}
+            </div>
+
+            {% if record.analysis %}
+            <div>
+                <div style="background: var(--bg-sub); border-radius: 12px; padding: 1.5rem; border: 1px solid var(--border);">
+                    <h2 style="font-size: 0.9rem; font-weight: 700; margin-bottom: 1rem;">使用ガイド</h2>
+                    <p style="font-size: 0.85rem; color: var(--text-sub); margin-bottom: 1.5rem; line-height: 1.6;">
+                        {{ record.analysis.usage_guide }}
+                    </p>
+
+                    <h2 style="font-size: 0.9rem; font-weight: 700; margin-bottom: 0.75rem;">関連テーブル</h2>
+                    <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                        {% for table, desc in (record.analysis.tables_involved or {}).items() %}
+                        <div style="background: white; border: 1px solid var(--border); padding: 0.75rem; border-radius: 6px;">
+                            <div style="font-weight: 600; font-size: 0.8rem; color: var(--accent);">{{ table }}</div>
+                            <div style="font-size: 0.75rem; color: var(--text-sub); margin-top: 0.2rem;">{{ desc }}</div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<script>
+function copySQLFallback() {
+    const text = document.getElementById('sqlSource').innerText;
+    const btn = document.getElementById('copyBtn');
+    const textArea = document.createElement("textarea");
+    textArea.value = text;
+    textArea.style.position = "fixed";
+    textArea.style.left = "-9999px";
+    textArea.style.top = "0";
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    let successful = false;
+    try {
+        successful = document.execCommand('copy');
+    } catch (err) {}
+    document.body.removeChild(textArea);
+    if (successful) {
+        const originalText = btn.innerHTML;
+        btn.innerHTML = '<i class="fas fa-check"></i> Copied!';
+        btn.style.color = '#10b981';
+        btn.style.borderColor = '#10b981';
+        setTimeout(() => {
+            btn.innerHTML = originalText;
+            btn.style.color = '';
+            btn.style.borderColor = '';
+        }, 2000);
+    }
+}
+</script>
+{% endblock %}

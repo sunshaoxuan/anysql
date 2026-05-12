@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "anysql"
+version = "0.1.1"
+description = "AI-assisted SQL asset analysis and natural-language search platform."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+authors = [
+  { name = "AnySQL Contributors" }
+]
+dependencies = [
+  "fastapi>=0.115.0",
+  "uvicorn[standard]>=0.34.0",
+  "jinja2>=3.1.0",
+  "python-multipart>=0.0.18",
+  "httpx>=0.28.0",
+  "chromadb>=1.0.0",
+  "sqlparse>=0.5.0",
+  "pyyaml>=6.0",
+  "pydantic>=2.10.0",
+  "pydantic-settings>=2.7.0",
+  "loguru>=0.7.0",
+  "aiofiles>=24.0.0"
+]
+
+[project.optional-dependencies]
+oracle = ["oracledb>=2.0.0"]
+dev = ["pytest>=8.0.0", "httpx>=0.28.0"]
+
+[tool.setuptools.packages.find]
+include = ["anysql*"]
+
+[tool.setuptools.package-data]
+anysql = ["web/templates/*.html", "web/static/css/*.css", "web/static/js/*.js"]

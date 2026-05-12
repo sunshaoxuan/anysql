@@ -1,0 +1,39 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<div class="app-container">
+    <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 3rem; border-bottom: 1px solid var(--border); padding-bottom: 1.5rem;">
+        <div>
+            <h1 style="font-size: 2rem; font-weight: 700; color: var(--text-main);">プロダクト管理</h1>
+            <p style="color: var(--text-sub); font-size: 0.95rem;">登録されているデータベースと製品の一覧</p>
+        </div>
+        <button class="btn btn-primary" onclick="alert('新機能: プロダクト追加')">
+            <i class="fas fa-plus"></i> 新規追加
+        </button>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 1.5rem;">
+        {% for id, p in products.items() %}
+        <div class="card" style="display: flex; flex-direction: column; justify-content: space-between;">
+            <div>
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1.5rem;">
+                    <div style="width: 48px; height: 48px; background: var(--accent-light); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: var(--accent); font-size: 1.25rem;">
+                        <i class="fas fa-database"></i>
+                    </div>
+                    <span class="badge badge-blue">{{ p.database.type }}</span>
+                </div>
+                <h3 style="font-size: 1.25rem; font-weight: 700; margin-bottom: 0.5rem;">{{ p.name }}</h3>
+                <p style="color: var(--text-sub); font-size: 0.85rem; margin-bottom: 1.5rem;">Host: {{ p.database.host }}</p>
+            </div>
+            
+            <div style="padding-top: 1.5rem; border-top: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center;">
+                <div style="display: flex; gap: 0.5rem;">
+                    <div style="font-size: 0.75rem; color: var(--text-sub);">SQL数: <span style="color: var(--text-main); font-weight: 600;">--</span></div>
+                </div>
+                <a href="/analysis" class="btn btn-outline" style="font-size: 0.8rem;">分析状況を確認</a>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}

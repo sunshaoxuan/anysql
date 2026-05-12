@@ -1,0 +1,131 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<div class="app-container">
+    <div class="search-hero">
+        <div style="display: inline-block; padding: 0.4rem 1rem; background: var(--accent-light); color: var(--accent); border-radius: 99px; font-size: 0.85rem; font-weight: 600; margin-bottom: 1rem;">
+            <i class="fas fa-sparkles"></i> AI-Powered SQL Intelligence
+        </div>
+        <h1>AnySQL Intelligence</h1>
+        <p style="color: var(--text-sub); font-size: 1.1rem; max-width: 600px; margin: 0 auto 3rem;">
+            自然言語で社内の複雑なSQL資産を検索。
+        </p>
+
+        <div class="search-box">
+            <i class="fas fa-search" style="position: absolute; left: 1.5rem; top: 1.35rem; color: var(--text-sub); font-size: 1.1rem;"></i>
+            <input type="text" id="searchInput" class="search-input" placeholder="検索ワードを入力してください..." onkeypress="if(event.key==='Enter')performSearch()">
+            <button onclick="performSearch()" class="btn btn-primary" style="position: absolute; right: 0.6rem; top: 0.6rem; height: calc(100% - 1.2rem); border-radius: 8px;">
+                検索
+            </button>
+        </div>
+    </div>
+
+    <div id="resultsArea" style="display: none; margin-top: 2rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; border-bottom: 1px solid var(--border); padding-bottom: 1rem;">
+            <h2 style="font-size: 1.25rem;">検索結果</h2>
+            <div style="color: var(--text-sub); font-size: 0.9rem;" id="matchCount">0 hits</div>
+        </div>
+        <div id="resultsGrid" style="display: grid; grid-template-columns: 1fr; gap: 1.5rem;"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+window.onload = function() {
+    const lastQuery = sessionStorage.getItem('lastQuery');
+    const lastResults = sessionStorage.getItem('lastResults');
+    if (lastQuery && lastResults) {
+        document.getElementById('searchInput').value = lastQuery;
+        renderResults(JSON.parse(lastResults));
+    }
+};
+
+function copyToClipboard(text, btn) {
+    navigator.clipboard.writeText(text).then(() => {
+        const originalText = btn.innerHTML;
+        btn.innerHTML = '<i class="fas fa-check"></i> Copied';
+        btn.classList.add('badge-green');
+        setTimeout(() => {
+            btn.innerHTML = originalText;
+            btn.classList.remove('badge-green');
+        }, 2000);
+    });
+}
+
+function renderResults(results) {
+    const resultsArea = document.getElementById('resultsArea');
+    const resultsGrid = document.getElementById('resultsGrid');
+    resultsArea.style.display = 'block';
+    document.getElementById('matchCount').innerText = `${results.length} hits`;
+    resultsGrid.innerHTML = '';
+
+    results.forEach(item => {
+        const card = document.createElement('div');
+        card.className = 'card';
+        const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, ch => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        }[ch]));
+        
+        // 提取 Metadata 展示
+        const tables = item.record?.metadata_snapshot || {};
+        const tableBadges = Object.entries(tables).map(([k, v]) => 
+            `<span class="badge" style="background:#f1f5f9; color:#475569; font-size:0.7rem;" title="${escapeHtml(v.comment || '')}">${escapeHtml(k)}</span>`
+        ).join(' ');
+        const rawSql = item.raw_sql || '';
+        const escapedSql = escapeHtml(rawSql);
+
+        card.innerHTML = `
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:1rem;">
+                <div>
+                    <div style="display:flex; gap:0.5rem; margin-bottom:0.5rem;">
+                        <span class="badge badge-blue">${escapeHtml(item.product)}</span>
+                        ${tableBadges}
+                    </div>
+                    <h3 style="font-size:1.15rem; font-weight:600; margin-bottom:0.5rem;">${escapeHtml(item.summary || 'SQL解析結果')}</h3>
+                    <p style="color:var(--text-sub); font-size:0.85rem; margin-bottom:1rem;">
+                        ${escapeHtml((item.business_context || []).join(' / '))}
+                    </p>
+                </div>
+                <div style="text-align:right;">
+                    <div style="color:var(--accent); font-weight:700; font-size:0.9rem; margin-bottom:0.5rem;">Match: ${Math.round(item.score * 100)}%</div>
+                    <a href="/sql/${encodeURIComponent(item.sql_id)}" class="btn btn-outline" style="font-size:0.75rem; padding: 0.4rem 0.8rem;">詳細</a>
+                </div>
+            </div>
+
+            <div class="code-container" style="position:relative; background:var(--bg-sub); border-radius:8px; border:1px solid var(--border); overflow:hidden; margin-bottom:1rem;">
+                <div style="position:absolute; right:0.5rem; top:0.5rem; z-index:10;">
+                    <button data-sql="${escapeHtml(rawSql)}" onclick="copyToClipboard(this.dataset.sql, this)" class="btn-copy" style="background:white; border:1px solid var(--border); border-radius:4px; font-size:0.7rem; padding:0.2rem 0.5rem; cursor:pointer;">
+                        <i class="far fa-copy"></i> Copy
+                    </button>
+                </div>
+                <pre style="margin:0; padding:1.2rem; font-size:0.85rem; max-height:150px; overflow-y:auto; font-family:'Fira Code', monospace; line-height:1.5;"><code>${escapedSql}</code></pre>
+            </div>
+        `;
+        resultsGrid.innerHTML += card.outerHTML;
+    });
+}
+
+async function performSearch() {
+    const query = document.getElementById('searchInput').value;
+    if (!query) return;
+    const resultsGrid = document.getElementById('resultsGrid');
+    document.getElementById('resultsArea').style.display = 'block';
+    resultsGrid.innerHTML = '<div style="text-align:center; padding:3rem; color:var(--text-sub);"><i class="fas fa-spinner fa-spin"></i> 検索中...</div>';
+
+    try {
+        const response = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+        const results = await response.json();
+        sessionStorage.setItem('lastQuery', query);
+        sessionStorage.setItem('lastResults', JSON.stringify(results));
+        renderResults(results);
+    } catch (err) {
+        resultsGrid.innerHTML = '<div style="color:red; text-align:center;">エラーが発生しました。</div>';
+    }
+}
+</script>
+{% endblock %}

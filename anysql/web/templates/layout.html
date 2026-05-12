@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}AnySQL | 智能SQLプラットフォーム{% endblock %}</title>
+    <link rel="stylesheet" href="/static/css/index.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    {% block head %}{% endblock %}
+</head>
+<body>
+    <nav class="header">
+        <a href="/" class="logo">
+            <i class="fas fa-microchip"></i>
+            Any<span>SQL</span>
+        </a>
+        <div style="display: flex; gap: 1.5rem; align-items: center;">
+            <a href="/products" style="text-decoration: none; color: var(--text-sub); font-size: 0.9rem; font-weight: 500;">プロダクト管理</a>
+            <a href="/analysis" style="text-decoration: none; color: var(--text-sub); font-size: 0.9rem; font-weight: 500;">分析ダッシュボード</a>
+            <div style="width: 1px; height: 20px; background: var(--border);"></div>
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <div style="width: 32px; height: 32px; border-radius: 50%; background: var(--accent); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 0.8rem;">JP</div>
+                <span style="font-size: 0.85rem; color: var(--text-main); font-weight: 500;">User_Admin</span>
+            </div>
+        </div>
+    </nav>
+
+    <main>
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer style="padding: 4rem 0 2rem; text-align: center; color: var(--text-sub); font-size: 0.8rem;">
+        &copy; 2026 AnySQL Intelligence Platform. Built for Excellence.
+    </footer>
+
+    <script>
+        // 全局通知/加载逻辑
+    </script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

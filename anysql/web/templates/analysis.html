@@ -1,0 +1,118 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<div class="app-container" style="max-width: 800px;">
+    <header style="margin-bottom: 3rem;">
+        <h1 style="font-size: 2rem; font-weight: 700; margin-bottom: 0.5rem;">分析ダッシュボード</h1>
+        <p style="color: var(--text-sub);">システム全体のSQL解析進捗を確認・管理します。</p>
+    </header>
+
+    <div class="grid" style="grid-template-columns: 1fr;">
+        {% for id, product in products.items() %}
+        <div class="card" id="card-{{ id }}" style="padding: 2rem; margin-bottom: 2rem;">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1.5rem;">
+                <div>
+                    <h3 style="font-size: 1.25rem; font-weight: 600; margin-bottom: 0.25rem;">{{ product.name }}</h3>
+                    <p style="color: var(--text-sub); font-size: 0.85rem;">Source: {{ product.sql_dir }}</p>
+                </div>
+                <button onclick="startAnalysis('{{ id }}')" id="btn-{{ id }}" class="btn btn-primary" style="min-width: 120px;">
+                    <i class="fas fa-play"></i> 解析開始
+                </button>
+            </div>
+
+            <div id="stats-{{ id }}" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-bottom: 1.5rem;">
+                <div style="background: var(--bg-sub); padding: 1rem; border-radius: 8px; text-align: center;">
+                    <div style="font-size: 0.75rem; color: var(--text-sub); margin-bottom: 0.25rem;">合計 (Total)</div>
+                    <div id="total-{{ id }}" style="font-size: 1.25rem; font-weight: 700;">0</div>
+                </div>
+                <div style="background: var(--bg-sub); padding: 1rem; border-radius: 8px; text-align: center;">
+                    <div style="font-size: 0.75rem; color: var(--text-sub); margin-bottom: 0.25rem;">完了 (Done)</div>
+                    <div id="done-{{ id }}" style="font-size: 1.25rem; font-weight: 700; color: var(--success);">0</div>
+                </div>
+                <div style="background: var(--bg-sub); padding: 1rem; border-radius: 8px; text-align: center;">
+                    <div style="font-size: 0.75rem; color: var(--text-sub); margin-bottom: 0.25rem;">失敗 (Failed)</div>
+                    <div id="fail-{{ id }}" style="font-size: 1.25rem; font-weight: 700; color: #ef4444;">0</div>
+                </div>
+            </div>
+
+            <div class="progress-container" style="height: 10px; background: #e2e8f0; border-radius: 5px; overflow: hidden; position: relative;">
+                <div id="progress-bar-{{ id }}" style="height: 100%; width: 0%; background: var(--accent); transition: width 0.5s ease;"></div>
+            </div>
+            <div id="status-text-{{ id }}" style="font-size: 0.8rem; color: var(--text-sub); margin-top: 0.75rem; display: flex; justify-content: space-between;">
+                <span id="status-label-{{ id }}">待機中...</span>
+                <span id="percent-{{ id }}">0%</span>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const activePolls = {};
+
+async function startAnalysis(productId) {
+    const btn = document.getElementById(`btn-${productId}`);
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 起動中';
+
+    try {
+        const res = await fetch(`/api/analysis/${productId}/start?force=true`, { method: 'POST' });
+        const data = await res.json();
+        console.log("Started:", data);
+        pollProgress(productId);
+    } catch (err) {
+        console.error("Start failed:", err);
+        btn.disabled = false;
+        btn.innerText = '解析開始';
+    }
+}
+
+async function pollProgress(productId) {
+    if (activePolls[productId]) return;
+    activePolls[productId] = true;
+
+    const interval = setInterval(async () => {
+        try {
+            const res = await fetch(`/api/analysis/${productId}/progress`);
+            if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+            
+            const data = await res.json();
+            console.log("Progress Data:", data);
+
+            // 使用安全访问，防止 undefined 渲染到页面
+            document.getElementById(`total-${productId}`).innerText = data.total ?? 0;
+            document.getElementById(`done-${productId}`).innerText = data.completed ?? 0;
+            document.getElementById(`fail-${productId}`).innerText = data.failed ?? 0;
+
+            const total = data.total || 0;
+            const processed = (data.completed || 0) + (data.failed || 0);
+            const percent = total > 0 ? Math.round(processed / total * 100) : 0;
+            
+            document.getElementById(`progress-bar-${productId}`).style.width = `${percent}%`;
+            document.getElementById(`percent-${productId}`).innerText = `${percent}%`;
+            
+            if (data.status === 'running') {
+                document.getElementById(`status-label-${productId}`).innerText = `解析中: ${data.current_sql || '...'}`;
+                document.getElementById(`btn-${productId}`).disabled = true;
+                document.getElementById(`btn-${productId}`).innerHTML = '<i class="fas fa-spinner fa-spin"></i> 解析中';
+            } else if (data.status === 'completed') {
+                document.getElementById(`status-label-${productId}`).innerText = '解析完了';
+                document.getElementById(`btn-${productId}`).disabled = false;
+                document.getElementById(`btn-${productId}`).innerText = '再解析';
+                clearInterval(interval);
+                activePolls[productId] = false;
+            }
+        } catch (err) {
+            console.error("Polling error:", err);
+        }
+    }, 1500);
+}
+
+// 启动时初次刷新
+{% for id in products.keys() %}
+pollProgress('{{ id }}');
+{% endfor %}
+</script>
+{% endblock %}

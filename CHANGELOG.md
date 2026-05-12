@@ -1,0 +1,36 @@
+# Changelog
+
+All notable changes to AnySQL are documented in this file.
+
+## [0.1.1] - 2026-05-12
+
+### Added
+
+- Added repository-ready project metadata via `pyproject.toml`.
+- Added `README.md` with setup, runtime, API, and repository data policy.
+- Added `config.example.yaml` for safe local configuration bootstrapping.
+- Added `.gitignore` to exclude local secrets, runtime data, product assets, caches, and generated files.
+
+### Changed
+
+- Bumped package version from `0.1.0` to `0.1.1`.
+
+### Fixed
+
+- Mounted product API routes in the FastAPI app.
+- Passed all configured LLM parameters into `LLMClient`.
+- Closed the LLM HTTP client during application shutdown.
+- Made static/template paths independent of the process working directory.
+- Initialized file logging from configuration.
+- Added structured Agent execution for Pydantic response models.
+- Fixed analysis pipeline calls to missing metadata helper methods.
+- Persisted failed analysis records with error details.
+- Added `metadata_snapshot` to `SQLRecord`.
+- Preserved comments, keywords, and business context in vector search metadata.
+- Escaped rendered search result content in the frontend.
+
+## [0.1.0] - 2026-05-11
+
+### Added
+
+- Initial SQL parsing, LLM analysis, ChromaDB search, FastAPI APIs, and web UI prototype.

@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}AnySQL{% endblock %}</title>
+    <meta name="description" content="AnySQL - 智能SQL分析与自然語言検索ツール">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+JP:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+    {% block head %}{% endblock %}
+</head>
+<body>
+    <nav class="navbar" id="main-nav">
+        <div class="nav-brand">
+            <span class="nav-logo">⚡</span>
+            <span class="nav-title">AnySQL</span>
+        </div>
+        <div class="nav-links">
+            <a href="/" class="nav-link {% if request.url.path == '/' %}active{% endif %}" id="nav-search">検索</a>
+            <a href="/products" class="nav-link {% if request.url.path == '/products' %}active{% endif %}" id="nav-products">製品</a>
+            <a href="/analysis" class="nav-link {% if request.url.path == '/analysis' %}active{% endif %}" id="nav-analysis">分析</a>
+        </div>
+        <div class="nav-status" id="nav-status">
+            <span class="status-dot"></span>
+            <span class="status-text">接続中...</span>
+        </div>
+    </nav>
+
+    <main class="main-content">
+        {% block content %}{% endblock %}
+    </main>
+
+    <script src="/static/js/app.js"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

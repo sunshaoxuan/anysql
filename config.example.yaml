@@ -1,0 +1,42 @@
+# ============================================================
+# AnySQL example configuration
+# Copy this file to config.yaml and adjust local values.
+# ============================================================
+
+llm:
+  base_url: "http://localhost:11434"
+  chat_model: "qwen3:14b"
+  embed_model: "bge-m3"
+  timeout: 120
+  max_retries: 3
+  temperature: 0.3
+
+vector_db:
+  persist_dir: "./data/chroma_db"
+  collection_prefix: "anysql"
+
+server:
+  host: "127.0.0.1"
+  port: 8768
+
+products:
+  demo:
+    name: "Demo Product"
+    description: "Example product configuration"
+    sql_dir: "./products/demo/sql"
+    desc_dir: "./products/demo/desc"
+    metadata_dir: "./products/demo/metadata"
+    database:
+      type: "oracle"
+      host:
+      port: 1521
+      service_name:
+      username:
+      password:
+
+logging:
+  level: "INFO"
+  dir: "./data/logs"
+  rotation: "10 MB"
+  retention: "30 days"
+  format: "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level:<8} | {name}:{function}:{line} | {message}"
