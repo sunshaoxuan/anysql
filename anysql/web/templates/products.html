@@ -38,6 +38,7 @@
                 </div>
                 <div class="editor-actions">
                     <button type="submit" class="btn btn-primary icon-btn" title="Save"><i class="fas fa-floppy-disk"></i></button>
+                    <button type="button" class="btn btn-outline icon-btn danger-btn" onclick="deleteCurrentProduct()" title="Delete"><i class="fas fa-trash"></i></button>
                     <button type="button" class="btn btn-outline icon-btn" onclick="newProduct()" title="Clear"><i class="fas fa-eraser"></i></button>
                 </div>
             </form>
@@ -49,6 +50,7 @@
 {% block scripts %}
 <script>
 let products = [];
+let editingProductId = null;
 
 function fillForm(product = {}) {
     const form = document.getElementById('productForm');
@@ -72,6 +74,7 @@ function fillForm(product = {}) {
         const el = form.elements[key];
         if (el) el.value = value ?? '';
     }
+    editingProductId = product.id || null;
 }
 
 function newProduct() {
@@ -114,6 +117,7 @@ document.getElementById('productForm').addEventListener('submit', async (event) 
     event.preventDefault();
     const form = event.currentTarget;
     const payload = Object.fromEntries(new FormData(form).entries());
+    payload.original_id = editingProductId || payload.id;
     payload.database_port = Number(payload.database_port || 1521);
     const res = await fetch('/api/products', {
         method: 'POST',
@@ -126,6 +130,20 @@ document.getElementById('productForm').addEventListener('submit', async (event) 
     }
     await loadProducts();
 });
+
+async function deleteCurrentProduct() {
+    const id = editingProductId || document.getElementById('productForm').elements.id.value;
+    if (!id) return;
+    if (!confirm(`Delete product configuration: ${id}?`)) return;
+    const res = await fetch(`/api/products/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (!res.ok) {
+        alert(await res.text());
+        return;
+    }
+    editingProductId = null;
+    await loadProducts();
+    if (!products.length) newProduct();
+}
 
 loadProducts();
 </script>

@@ -616,3 +616,12 @@ body {
     justify-content: flex-end;
     gap: 0.5rem;
 }
+
+.danger-btn {
+    color: #DC2626;
+}
+
+.danger-btn:hover {
+    border-color: #FCA5A5;
+    background: #FEF2F2;
+}

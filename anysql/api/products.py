@@ -97,7 +97,13 @@ async def upsert_product(req: ProductUpsertRequest):
     """新增或更新产品配置"""
     state = _get_app_state()
     config = state["config"]
-    existing = config.products.get(req.id)
+    original_id = req.original_id or req.id
+    existing = config.products.get(original_id)
+    if original_id != req.id and original_id in config.products:
+        config.products.pop(original_id)
+        pipeline = state.get("pipeline")
+        if pipeline and original_id in pipeline._progress_map:
+            pipeline._progress_map.pop(original_id, None)
     password = req.database_password
     if not password and existing:
         password = existing.database.password
@@ -121,8 +127,24 @@ async def upsert_product(req: ProductUpsertRequest):
         from pathlib import Path
         Path(d).mkdir(parents=True, exist_ok=True)
     save_config(config)
-    logger.info(f"产品配置已更新: {req.id}")
+    logger.info(f"产品配置已更新: {original_id} -> {req.id}")
     return await get_product(req.id)
+
+
+@router.delete("/{product_id}")
+async def delete_product(product_id: str):
+    """删除产品配置，不删除磁盘上的产品数据。"""
+    state = _get_app_state()
+    config = state["config"]
+    if product_id not in config.products:
+        raise HTTPException(status_code=404, detail=f"产品不存在: {product_id}")
+    config.products.pop(product_id)
+    pipeline = state.get("pipeline")
+    if pipeline:
+        pipeline._progress_map.pop(product_id, None)
+    save_config(config)
+    logger.info(f"产品配置已删除: {product_id}")
+    return {"status": "deleted", "id": product_id}
 
 
 @router.get("/{product_id}/sqls")

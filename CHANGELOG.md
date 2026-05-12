@@ -2,6 +2,17 @@
 
 All notable changes to AnySQL are documented in this file.
 
+## [0.1.6] - 2026-05-12
+
+### Added
+
+- Added product deletion support in the Product management API and UI.
+
+### Fixed
+
+- Fixed product ID editing so changing an existing product ID migrates the configuration key instead of leaving an undeletable stale product behind.
+- Preserved existing database passwords when editing a product without entering a replacement password.
+
 ## [0.1.5] - 2026-05-12
 
 ### Added

@@ -222,6 +222,7 @@ class ProductInfo(BaseModel):
 class ProductUpsertRequest(BaseModel):
     """新增或更新产品配置"""
     id: str = Field(pattern=r"^[A-Za-z0-9_-]+$")
+    original_id: Optional[str] = Field(default=None, pattern=r"^[A-Za-z0-9_-]+$")
     name: str
     description: str = ""
     rules: str = ""
