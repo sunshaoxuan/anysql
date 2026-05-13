@@ -586,6 +586,11 @@ body {
     justify-content: center;
 }
 
+.sql-code.invalid-sql {
+    color: #94A3B8;
+    text-align: center;
+}
+
 .sql-keyword { color: #60A5FA; font-weight: 700; }
 .sql-string { color: #86EFAC; }
 .sql-param { color: #FBBF24; font-weight: 700; }

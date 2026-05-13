@@ -192,12 +192,13 @@ async def _knowledge_gap_analysis(gap_id: str) -> dict:
             gap = repo.get(gap_id)
             if not gap:
                 raise ValueError(f"Knowledge gap not found: {gap_id}")
+            cleared = repo.clear_proposed_candidates(gap_id)
             repo.update_progress(
                 gap_id,
                 "term_mining",
                 15,
                 "Extracting business terms from the failed request.",
-                {"requirement": gap.requirement, "triggers": gap.trigger_reasons},
+                {"requirement": gap.requirement, "triggers": gap.trigger_reasons, "cleared_candidates": cleared},
                 status="running",
             )
             session.commit()
@@ -366,10 +367,16 @@ def _explore_gap_fields(session, product_id: str, terms: list[tuple[str, list[st
         role = getattr(profile, "role", "unknown") if profile else "unknown"
         if role in dangerous:
             continue
-        haystack = f"{table.table_name} {table.comment or ''} {column.column_name} {column.comment or ''}".upper()
+        table_text = f"{table.table_name} {table.comment or ''}".upper()
+        column_text = f"{column.column_name} {column.comment or ''}".upper()
+        haystack = f"{table_text} {column_text}"
         hits = [kw for kw in keywords if str(kw).upper() in haystack]
         strong_hits = [hit for hit in hits if hit not in weak_keywords]
         if not strong_hits:
+            continue
+        column_name = str(column.column_name or "").upper()
+        field_strength = _gap_field_strength(table_text, column_text, column_name, strong_hits)
+        if field_strength <= 0:
             continue
         item = by_table.setdefault(table.table_name, {
             "table": table.table_name,
@@ -379,9 +386,16 @@ def _explore_gap_fields(session, product_id: str, terms: list[tuple[str, list[st
             "fields": [],
             "field_comments": {},
             "matched_terms": [],
+            "strong_field_count": 0,
+            "weak_field_count": 0,
+            "penalty": _gap_table_penalty(table_text),
             "confidence": 0.0,
             "reason": "metadata terms matched",
         })
+        if field_strength >= 2:
+            item["strong_field_count"] += 1
+        else:
+            item["weak_field_count"] += 1
         item["fields"].append(column.column_name)
         item["field_comments"][column.column_name] = column.comment or ""
         item["matched_terms"].extend(strong_hits)
@@ -389,10 +403,23 @@ def _explore_gap_fields(session, product_id: str, terms: list[tuple[str, list[st
     for item in by_table.values():
         fields = list(dict.fromkeys(item["fields"]))
         matched_terms = list(dict.fromkeys(item["matched_terms"]))
-        confidence = min(0.92, 0.35 + len(fields) * 0.08 + len(matched_terms) * 0.04)
+        strong_count = int(item.get("strong_field_count") or 0)
+        if strong_count == 0:
+            continue
+        confidence = (
+            0.28
+            + min(0.32, strong_count * 0.08)
+            + min(0.18, len(matched_terms) * 0.025)
+            + min(0.12, len(fields) * 0.012)
+            - float(item.get("penalty") or 0.0)
+        )
+        confidence = max(0.15, min(0.93, confidence))
+        if confidence < 0.48:
+            continue
         item["fields"] = fields
         item["matched_terms"] = matched_terms
         item["confidence"] = round(confidence, 4)
+        item["reason"] = f"{strong_count} strong dependent/support field markers"
         candidates.append(item)
     return sorted(candidates, key=lambda row: (-float(row["confidence"]), row["table"]))[:20]
 
@@ -401,3 +428,29 @@ def _propose_intent_name(requirement: str, terms: list[tuple[str, list[str], str
     if any(term in {"多子女", "扶养中", "子女个数"} for term, _, _ in terms):
         return "employee_dependent_children"
     return "auto_proposed_intent"
+
+
+def _gap_field_strength(table_text: str, column_text: str, column_name: str, hits: list[str]) -> int:
+    """Score whether a metadata field is real dependent/support evidence, not just an employee key."""
+    if column_name in {"CCOMPKB", "CQTAIKEIKB", "NGAITONEN", "CSHAINNO", "CMNCLIENT", "CMNCOMP", "CMNUSER", "DMNDATE", "NSEQ"}:
+        return 0
+    text = f"{table_text} {column_text}"
+    score = 0
+    if any(marker in column_text for marker in ("扶養", "扶养", "親族", "家族", "児童", "子供", "子女", "CHILD", "KODOMO", "JIDO", "FUYO", "FUYOU", "KAZOKU", "ZOKUGARA")):
+        score += 2
+    if any(marker in table_text for marker in ("扶養親族", "扶養控除", "児童", "家族", "親族")):
+        score += 1
+    if any(marker in column_text for marker in ("人数", "人員", "数", "COUNT", "NINZU")):
+        score += 1
+    if hits:
+        score += 1
+    return score
+
+
+def _gap_table_penalty(table_text: str) -> float:
+    penalty = 0.0
+    if any(marker in table_text for marker in ("採用者給与", "給与", "退職手当", "XML", "申告書ﾃﾞｰﾀ", "申告書データ", "APP", "取込", "入力")):
+        penalty += 0.18
+    if any(marker in table_text for marker in ("KARI_", "仮", "一時", "WK", "WORK")):
+        penalty += 0.12
+    return penalty

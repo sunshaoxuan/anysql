@@ -2,6 +2,15 @@
 
 All notable changes to AnySQL are documented in this file.
 
+## [0.6.2] - 2026-05-14
+
+### Changed
+
+- Invalid assistant runs no longer display blocked SQL in the main SQL pane.
+- Knowledge Gap progress now shows user-facing review status instead of raw validator noise in the chat result.
+- Self-improvement evidence mining now downranks payroll/input/XML/provisional tables and requires strong dependent/support field markers before proposing table-field candidates.
+- Rerun Knowledge Gap analysis clears stale proposed candidates before producing a new review pack.
+
 ## [0.6.1] - 2026-05-13
 
 ### Added

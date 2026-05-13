@@ -508,6 +508,16 @@ class KnowledgeGapRepository:
         gap.progress_message = "Starting knowledge gap analysis."
         self.session.flush()
 
+    def clear_proposed_candidates(self, gap_id: str) -> int:
+        rows = list(self.session.scalars(select(KnowledgeCandidate).where(
+            KnowledgeCandidate.gap_id == gap_id,
+            KnowledgeCandidate.status == "proposed",
+        )))
+        for row in rows:
+            self.session.delete(row)
+        self.session.flush()
+        return len(rows)
+
     def update_progress(
         self,
         gap_id: str,

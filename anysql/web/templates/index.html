@@ -262,7 +262,7 @@ function renderRecord(response) {
     const invalidReason = response.invalid_reason || (validation && validation.valid === false ? ((validation.errors || []).join(' / ') || 'Invalid draft') : '');
     const canAccept = !(response.learned || response.mode === 'matched' || warnings.length || invalidReason || (validation && validation.valid === false));
     currentSqlId = stmt.id;
-    currentSql = decodeHtmlEntities(stmt.raw_sql || '');
+    currentSql = response.mode === 'invalid' ? '' : decodeHtmlEntities(stmt.raw_sql || '');
 
     const meta = document.getElementById('currentSqlMeta');
     meta.dataset.empty = 'false';
@@ -277,7 +277,13 @@ function renderRecord(response) {
         detail.classList.add('disabled-link');
         detail.setAttribute('aria-disabled', 'true');
     }
-    renderSql();
+    if (response.mode === 'invalid') {
+        const sqlEl = document.getElementById('currentSql');
+        sqlEl.className = 'sql-code empty invalid-sql';
+        sqlEl.textContent = 'SQL blocked: validation failed. Review the knowledge gap before rerunning.';
+    } else {
+        renderSql();
+    }
     renderMatches(response.matches || []);
 
     const badgeText = response.learned ? 'Learned' : (response.mode || 'draft').toUpperCase();
@@ -292,11 +298,18 @@ function renderRecord(response) {
         <p>${escapeHtml((analysis.business_context || []).join(' / '))}</p>
         ${renderEvidenceSummary(intentPlan, bundles, validation, response)}
         ${response.knowledge_gap_id ? renderKnowledgeGapProgress(response.knowledge_gap_id) : ''}
-        ${invalidReason ? `<p class="side-muted">${escapeHtml(invalidReason)}</p>` : ''}
-        ${warnings.length ? `<p class="side-muted">${escapeHtml(warnings.join(' / '))}</p>` : ''}
+        ${invalidReason ? `<p class="side-muted">${escapeHtml(friendlyInvalidReason(response, invalidReason))}</p>` : ''}
+        ${warnings.length && response.mode !== 'invalid' ? `<p class="side-muted">${escapeHtml(warnings.join(' / '))}</p>` : ''}
         ${canAccept ? `<button class="btn btn-primary icon-btn" onclick="acceptCurrentSql(this)" title="${escapeHtml(t('accept'))}"><i class="fas fa-thumbs-up"></i></button>` : ''}
     `);
     if (response.knowledge_gap_id) startKnowledgeGapPolling(response.knowledge_gap_id);
+}
+
+function friendlyInvalidReason(response, rawReason) {
+    if (response && response.source === 'needs_knowledge_review') {
+        return '表・字段・条件证据不足，已转入知识补强审核。当前 SQL 已被拦截，不可直接使用。';
+    }
+    return rawReason;
 }
 
 function renderKnowledgeGapProgress(gapId) {
@@ -357,19 +370,20 @@ function startKnowledgeGapPolling(gapId) {
 function renderEvidenceSummary(intentPlan, bundles, validation, response) {
     const intents = (intentPlan.units || []).map(unit => unit.name).filter(Boolean).join(' / ');
     const tableNames = [];
-    (bundles || []).forEach(bundle => (bundle.recommended_tables || []).slice(0, 3).forEach(item => {
+    const compact = response && response.source === 'needs_knowledge_review';
+    (bundles || []).forEach(bundle => (bundle.recommended_tables || []).slice(0, compact ? 1 : 3).forEach(item => {
         if (item.table && !tableNames.includes(item.table)) tableNames.push(item.table);
     }));
     const fields = [];
-    (bundles || []).forEach(bundle => (bundle.recommended_fields || []).slice(0, 6).forEach(item => {
+    (bundles || []).forEach(bundle => (bundle.recommended_fields || []).slice(0, compact ? 2 : 6).forEach(item => {
         const label = item.table && item.column ? `${item.table}.${item.column}` : item.column;
         if (label && !fields.includes(label)) fields.push(label);
     }));
     const parts = [
         { label: 'Status', value: validation && validation.valid === false ? 'INVALID' : 'VERIFIED' },
         intents ? { label: 'Intent', value: intents } : null,
-        tableNames.length ? { label: 'Tables', value: tableNames.join(', ') } : null,
-        fields.length ? { label: 'Fields', value: fields.join(', ') } : null,
+        tableNames.length && !compact ? { label: 'Tables', value: tableNames.join(', ') } : null,
+        fields.length && !compact ? { label: 'Fields', value: fields.join(', ') } : null,
         response.llm_call_count ? { label: 'LLM', value: response.llm_call_count } : null,
         response.client_elapsed_ms ? { label: '思考時間', value: formatDuration(response.client_elapsed_ms) } : null,
         response.source ? { label: 'Source', value: response.source } : null,

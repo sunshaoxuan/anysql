@@ -3,6 +3,7 @@ from anysql.harness.agentic_service import HarnessAgentService, build_evidence_b
 from anysql.models.schemas import SQLAnalysis, SQLRecord, SQLStatement
 from anysql.storage.models import KnowledgeGap
 from anysql.storage.rag_repository import KnowledgeGapRepository, _rrf_fuse
+from anysql.worker_tasks import _gap_field_strength, _gap_table_penalty
 
 
 def test_intent_plan_preserves_name_and_all_record_conditions():
@@ -216,3 +217,13 @@ def test_knowledge_gap_dict_exposes_progress():
     assert data["progress"]["stage"] == "evidence_search"
     assert data["progress"]["percent"] == 45.0
     assert data["progress"]["detail"]["term_count"] == 3
+
+
+def test_gap_field_strength_ignores_generic_employee_key():
+    assert _gap_field_strength("EMP TABLE", "CSHAINNO 社員番号", "CSHAINNO", ["社員"]) == 0
+    assert _gap_field_strength("扶養親族情報", "NFUYO 扶養親族人数", "NFUYO", ["扶養", "親族"]) >= 3
+
+
+def test_gap_table_penalty_downranks_input_xml_payroll_tables():
+    assert _gap_table_penalty("[年調ｿﾌﾄOP]扶養控除申告書ﾃﾞｰﾀ XML") > 0
+    assert _gap_table_penalty("扶養親族情報") == 0
