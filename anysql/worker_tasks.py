@@ -66,7 +66,7 @@ async def _metadata_delta_sync(job_id: str, product_code: str) -> dict:
             jobs = JobRepository(session)
             metadata = MetadataRepository(session)
             total, changed = metadata.upsert_tables(product.id, table_data)
-            profiled = TableProfileRepository(session).rebuild_auto(product.id)
+            profiled = await TableProfileRepository(session).rebuild_auto_with_llm(product.id, llm)
             indexed = await PGVectorRepository(session, llm, config.llm.embed_model).index_metadata(product.id)
             rag = RagRepository(session)
             rag_nodes = rag.rebuild_metadata_nodes(product.id)

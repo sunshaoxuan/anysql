@@ -12,11 +12,14 @@ All notable changes to AnySQL are documented in this file.
 - Added agent run audit API at `GET /api/agent-runs/{run_id}`.
 - Added immediate positive-feedback RAG nodes and embeddings when users accept generated SQL.
 - Added Product UI controls for RAG rebuild/stats and join edge inspection.
+- Added LLM-assisted table profile review for ambiguous Metadata tables, constrained to fixed domain/role enums with deterministic fallback.
+- Added a single-table LLM profile classification API so suspicious table roles can be reviewed without blocking full product rebuilds.
 
 ### Changed
 
 - Database-mode assistant requests now use an evidence-first Harness Agent path before falling back to the legacy flow.
 - Metadata sync and embedding rebuild jobs now prepare multi-dimensional RAG nodes in addition to legacy pgvector embeddings.
+- Metadata sync and manual profile rebuild now use deterministic profiling plus a bounded qwen3 review pass for high-priority conflicting table evidence.
 - Assistant UI now displays intent/evidence/validation summaries and hides acceptance when validation fails.
 - Merged the old Analysis dashboard navigation into the Product / Knowledge management entry; SQL analysis can now be started from the product page.
 - Updated operation and design docs to reflect Harness Agent, RAG, Docker port 8765, and test-data cleanup rules.
@@ -24,6 +27,7 @@ All notable changes to AnySQL are documented in this file.
 ### Fixed
 
 - Added deterministic validation gates for evidence-table drift, unknown evidence fields, missing name conditions, and unsafe generated parameter names.
+- Tightened automatic table profile inference so part-time employee basic master tables such as `DJND3001` are classified as `employee/master` instead of drifting to `transfer/master`.
 
 ## [0.4.0] - 2026-05-13
 

@@ -96,11 +96,23 @@ def infer_table_profile(table_name: str, comment: str = "", columns: list[dict] 
     elif _has(text, "異動情報", "任免", "発令"):
         role, reasons = "business_fact", ["business fact markers"]
 
+    employee_master = role == "master" and _has(
+        text,
+        "個人基本情報",
+        "基本情報DB",
+        "非常勤職員",
+        "社員",
+        "職員",
+        "氏名",
+        "CNAMEKNJ",
+        "CNAMEKNA",
+    )
+
     domain = "unknown"
-    if _has(text, "異動情報", "任免", "発令", "IDO", "KIDO"):
-        domain = "transfer"
-    elif _has(text, "個人基本情報", "社員", "職員", "氏名", "CNAMEKNJ", "CNAMEKNA"):
+    if employee_master or _has(text, "個人基本情報", "社員", "職員", "氏名", "CNAMEKNJ", "CNAMEKNA"):
         domain = "employee"
+    elif _has(text, "異動情報", "任免", "発令") or _looks_like_transfer_table(table):
+        domain = "transfer"
     elif _has(text, "給与", "賞与"):
         domain = "payroll"
     elif _has(text, "所属", "組織", "部門"):
@@ -113,6 +125,7 @@ def infer_table_profile(table_name: str, comment: str = "", columns: list[dict] 
         "DHJKIDO_R": ("transfer", "history_fact", 0.91, "part-time transfer history table"),
         "XCIDOCHKLOG": ("transfer", "log", 0.98, "transfer check log table"),
         "DJND0110": ("employee", "master", 0.96, "personal basic master table"),
+        "DJND3001": ("employee", "master", 0.96, "part-time employee basic master table"),
     }
     if table in preferred:
         domain, role, confidence, reason = preferred[table]
@@ -120,6 +133,28 @@ def infer_table_profile(table_name: str, comment: str = "", columns: list[dict] 
 
     confidence = 0.85 if role != "unknown" or domain != "unknown" else 0.2
     return TableProfileData(table, domain, role, confidence, ", ".join(reasons) or "no strong markers")
+
+
+def profile_review_context(table_name: str, comment: str = "", columns: list[dict] | None = None) -> dict:
+    table = (table_name or "").upper()
+    text = f"{table} {comment or ''} " + " ".join(
+        f"{str(col.get('column_name') or col.get('name') or '').upper()} {col.get('comment') or ''}"
+        for col in (columns or [])
+    )
+    markers = {
+        "employee": _has(text, "個人基本情報", "基本情報DB", "非常勤職員", "社員", "職員", "氏名", "CNAMEKNJ", "CNAMEKNA"),
+        "transfer": _has(text, "異動情報", "任免", "発令") or _looks_like_transfer_table(table),
+        "payroll": _has(text, "給与", "賞与"),
+        "organization": _has(text, "所属", "組織", "部門"),
+        "dangerous": _has(text, "ログ", "LOG", "CHKLOG", "CMSG", "CERRVALUE", "チェックログ", "ワーク", "WORK", "IF", "連携", "BRG", "バックアップ"),
+    }
+    return {
+        "table": table,
+        "comment": comment or "",
+        "markers": markers,
+        "needs_llm_review": sum(1 for key in ("employee", "transfer", "payroll", "organization") if markers[key]) > 1
+        or (markers["transfer"] and "基本情報" in text),
+    }
 
 
 def is_table_allowed(profile: object, policy: IntentPolicy | None) -> bool:
@@ -151,3 +186,7 @@ def table_policy_score(table_name: str, profile: object | None, policy: IntentPo
 def _has(text: str, *patterns: str) -> bool:
     value = text.upper()
     return any((pattern.upper() in value) if re.search(r"[A-Za-z_]", pattern) else pattern in text for pattern in patterns)
+
+
+def _looks_like_transfer_table(table: str) -> bool:
+    return bool(re.fullmatch(r"D[HK]?J?K?IDO(_R)?", table) or table in {"DKIDO", "DHJKIDO", "XCIDOCHKLOG"})

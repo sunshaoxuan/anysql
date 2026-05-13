@@ -25,6 +25,7 @@ from anysql.models.schemas import (
     StatementType,
 )
 from anysql.core.table_profiles import infer_table_profile
+from anysql.core.table_profile_classifier import classify_table_profile
 from anysql.storage.models import (
     Job,
     KnowledgeAcceptance,
@@ -357,6 +358,65 @@ class TableProfileRepository:
         self.session.flush()
         return count
 
+    async def rebuild_auto_with_llm(self, product_id: str, llm, max_llm_reviews: int = 20) -> int:
+        count = 0
+        tables = self.session.scalars(select(MetadataTable).where(MetadataTable.product_id == product_id)).all()
+        tables = sorted(tables, key=_profile_review_priority, reverse=True)
+        llm_reviews = 0
+        for table in tables:
+            existing = self.get(product_id, table.table_name)
+            if existing and existing.source == "manual":
+                continue
+            columns = [
+                {"column_name": col.column_name, "comment": col.comment}
+                for col in self.session.scalars(select(MetadataColumn).where(MetadataColumn.metadata_table_id == table.id).order_by(MetadataColumn.ordinal))
+            ]
+            if llm_reviews < max_llm_reviews:
+                inferred = await classify_table_profile(table.table_name, table.comment, columns, llm)
+                if inferred.source == "auto_llm":
+                    llm_reviews += 1
+            else:
+                inferred = infer_table_profile(table.table_name, table.comment, columns)
+            if not existing:
+                existing = MetadataTableProfile(product_id=product_id, table_name=table.table_name)
+                self.session.add(existing)
+            existing.domain = inferred.domain
+            existing.role = inferred.role
+            existing.confidence = inferred.confidence
+            existing.reason = inferred.reason
+            existing.source = inferred.source
+            existing.updated_by = "system"
+            count += 1
+        self.session.flush()
+        return count
+
+    async def classify_one_with_llm(self, product_id: str, table_name: str, llm) -> dict:
+        table_name = table_name.upper()
+        table = self.session.scalar(select(MetadataTable).where(MetadataTable.product_id == product_id, MetadataTable.table_name == table_name))
+        if not table:
+            raise ValueError(f"Table not found: {table_name}")
+        existing = self.get(product_id, table_name)
+        if existing and existing.source == "manual":
+            return self.to_dict(table, existing)
+        columns = [
+            {"column_name": col.column_name, "comment": col.comment}
+            for col in self.session.scalars(select(MetadataColumn).where(MetadataColumn.metadata_table_id == table.id).order_by(MetadataColumn.ordinal))
+        ]
+        inferred = await classify_table_profile(table.table_name, table.comment, columns, llm)
+        if inferred.source != "auto_llm":
+            inferred = infer_table_profile(table.table_name, table.comment, columns)
+        if not existing:
+            existing = MetadataTableProfile(product_id=product_id, table_name=table_name)
+            self.session.add(existing)
+        existing.domain = inferred.domain
+        existing.role = inferred.role
+        existing.confidence = inferred.confidence
+        existing.reason = inferred.reason
+        existing.source = inferred.source
+        existing.updated_by = "system"
+        self.session.flush()
+        return self.to_dict(table, existing)
+
     def get(self, product_id: str, table_name: str) -> MetadataTableProfile | None:
         return self.session.scalar(
             select(MetadataTableProfile).where(
@@ -416,6 +476,20 @@ class TableProfileRepository:
             "reason": profile.reason if profile else "",
             "source": profile.source if profile else "auto",
         }
+
+
+def _profile_review_priority(table: MetadataTable) -> int:
+    text = f"{table.table_name} {table.comment}"
+    score = 0
+    if "基本情報" in text:
+        score += 8
+    if "非常勤職員" in text:
+        score += 8
+    if table.table_name.upper().startswith("DJND"):
+        score += 5
+    if any(word in text for word in ("任免", "発令", "異動")):
+        score += 3
+    return score
 
 
 class JobRepository:

@@ -259,8 +259,24 @@ async def rebuild_table_profiles(product_id: str):
         product = ProductRepository(session).get_by_code(product_id)
         if not product:
             raise HTTPException(status_code=404, detail=f"产品不存在: {product_id}")
-        count = TableProfileRepository(session).rebuild_auto(product.id)
-        return {"status": "rebuilt", "profiled_count": count}
+        count = await TableProfileRepository(session).rebuild_auto_with_llm(product.id, state["llm"], max_llm_reviews=20)
+        return {"status": "rebuilt", "profiled_count": count, "classifier": "deterministic+llm_review"}
+
+
+@router.post("/{product_id}/table-profiles/{table_name}/classify")
+async def classify_table_profile_with_llm(product_id: str, table_name: str):
+    state = _get_app_state()
+    storage = state.get("storage")
+    if not (storage and storage.is_database_mode):
+        raise HTTPException(status_code=400, detail="table profiles require database mode")
+    with storage.database.session() as session:
+        product = ProductRepository(session).get_by_code(product_id)
+        if not product:
+            raise HTTPException(status_code=404, detail=f"产品不存在: {product_id}")
+        try:
+            return await TableProfileRepository(session).classify_one_with_llm(product.id, table_name, state["llm"])
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.post("/{product_id}/rag/rebuild")
