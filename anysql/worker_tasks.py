@@ -7,6 +7,8 @@ import json
 import tempfile
 from pathlib import Path
 
+from sqlalchemy import select
+
 from anysql.config import load_config
 from anysql.core.agent_engine import AgentEngine
 from anysql.core.llm_client import LLMClient
@@ -15,7 +17,9 @@ from anysql.core.sql_parser import scan_product_sqls
 from anysql.harness.pipeline import AnalysisPipeline
 from anysql.models.schemas import AnalysisStatus
 from anysql.storage.database import Database
+from anysql.storage.models import SQLRecordRow
 from anysql.storage.pgvector_engine import PGVectorRepository
+from anysql.storage.rag_repository import RagRepository
 from anysql.storage.repositories import (
     JobRepository,
     MetadataRepository,
@@ -64,7 +68,17 @@ async def _metadata_delta_sync(job_id: str, product_code: str) -> dict:
             total, changed = metadata.upsert_tables(product.id, table_data)
             profiled = TableProfileRepository(session).rebuild_auto(product.id)
             indexed = await PGVectorRepository(session, llm, config.llm.embed_model).index_metadata(product.id)
-            result = {"table_count": total or (index or {}).get("table_count", 0), "changed": changed, "profiled_count": profiled, "indexed_count": indexed}
+            rag = RagRepository(session)
+            rag_nodes = rag.rebuild_metadata_nodes(product.id)
+            rag_indexed = await rag.index_nodes(product.id, llm, config.llm.embed_model)
+            result = {
+                "table_count": total or (index or {}).get("table_count", 0),
+                "changed": changed,
+                "profiled_count": profiled,
+                "indexed_count": indexed,
+                "rag_node_count": rag_nodes,
+                "rag_indexed_count": rag_indexed,
+            }
             jobs.mark_succeeded(job_id, result)
             return result
     except Exception as exc:
@@ -142,7 +156,17 @@ async def _embedding_rebuild(job_id: str, product_code: str) -> dict:
             records = SQLKnowledgeRepository(session).list_records(product.id)
             sql_indexed = await PGVectorRepository(session, llm, config.llm.embed_model).index_records(records, product.id)
             metadata_indexed = await PGVectorRepository(session, llm, config.llm.embed_model).index_metadata(product.id)
-            result = {"sql_indexed": sql_indexed, "metadata_indexed": metadata_indexed}
+            rag = RagRepository(session)
+            rag_nodes = rag.rebuild_metadata_nodes(product.id)
+            accepted_rows = list(session.scalars(select(SQLRecordRow).where(
+                SQLRecordRow.product_id == product.id,
+                SQLRecordRow.learned.is_(True),
+            )))
+            for row in accepted_rows:
+                record = SQLKnowledgeRepository.to_schema(row)
+                rag.upsert_accepted_sql_nodes(product.id, record, row.comment or (record.analysis.summary if record.analysis else ""))
+            rag_indexed = await rag.index_nodes(product.id, llm, config.llm.embed_model)
+            result = {"sql_indexed": sql_indexed, "metadata_indexed": metadata_indexed, "rag_node_count": rag_nodes, "rag_indexed_count": rag_indexed}
             jobs.mark_succeeded(job_id, result)
             return result
     except Exception as exc:

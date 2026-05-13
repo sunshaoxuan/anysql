@@ -14,9 +14,13 @@ from sqlalchemy import select
 from anysql.core.query_expansion import expand_query_for_metadata
 from anysql.core.sql_cleaner import clean_generated_sql, strip_sql_comments
 from anysql.core.table_profiles import policy_for_intent, resolve_intent
+from anysql.harness.agentic_service import HarnessAgentService
+from anysql.logger import logger
 from anysql.models.schemas import AnalysisStatus, GeneratedSQL, SQLAssistantRequest, SQLAssistantResponse, SQLLearnRequest
 from anysql.storage.pgvector_engine import PGVectorRepository
 from anysql.storage.models import MetadataColumn, MetadataTable
+from anysql.storage.rag_repository import RagRepository
+from anysql.storage.rag_repository import AgentRunRepository
 from anysql.storage.repositories import ProductRepository, SQLKnowledgeRepository
 
 router = APIRouter(prefix="/api/assistant", tags=["assistant"])
@@ -39,6 +43,39 @@ async def assist_sql(req: SQLAssistantRequest):
     config = state["config"]
     storage = state.get("storage")
     if storage and storage.is_database_mode:
+        try:
+            result = await HarnessAgentService(config, storage, state["llm"], state["agent"], state["pipeline"]).assist_sql(req)
+            text = (
+                "找到可直接复用的 SQL。"
+                if result.mode == "matched"
+                else "已根据修正意见改写 SQL。请确认正确后再采纳入库。"
+                if result.mode == "revised"
+                else "没有足够高匹配的 SQL，已根据多维证据生成草稿。请确认正确后再采纳入库。"
+            )
+            if result.harness.invalid_reason:
+                text = f"已生成草稿，但未通过校验：{result.harness.invalid_reason}"
+            return SQLAssistantResponse(
+                product=req.product,
+                session_id=req.session_id,
+                mode=result.mode,
+                message=text,
+                matches=result.matches,
+                record=result.record,
+                learned=result.learned,
+                agent_run_id=result.harness.agent_run_id,
+                intent_plan=result.harness.intent_plan,
+                evidence_bundles=result.harness.evidence_bundles,
+                context_budget=result.harness.context_budget,
+                retrieval_scores=result.harness.retrieval_scores,
+                validation_result=result.harness.validation_result,
+                repair_count=result.harness.repair_count,
+                llm_call_count=result.harness.llm_call_count,
+                invalid_reason=result.harness.invalid_reason,
+            )
+        except Exception as exc:
+            # Fall through to the legacy path as a safety net while the harness layer is evolving.
+            logger.warning(f"Harness assistant path failed; falling back to legacy path: {type(exc).__name__}: {exc}")
+            pass
         with storage.database.session() as session:
             product = ProductRepository(session).get_by_code(req.product)
             if not product:
@@ -210,11 +247,16 @@ async def learn_sql(req: SQLLearnRequest):
             record.analyzed_at = datetime.now()
             with storage.database.session() as session:
                 product = ProductRepository(session).get_by_code(req.product)
+                if record.metadata_snapshot.get("validation_warnings"):
+                    raise HTTPException(status_code=400, detail="invalid draft cannot be learned")
                 SQLKnowledgeRepository(session).accept_generated(product.id, req.requirement, record)
                 await PGVectorRepository(session, state["llm"], config.llm.embed_model).index_records([record], product.id)
+                rag = RagRepository(session)
+                rag.upsert_accepted_sql_nodes(product.id, record, req.requirement, run_id=None)
+                await rag.index_nodes(product.id, state["llm"], config.llm.embed_model, facets={"sql_intent", "sql_structure", "predicate_pattern", "feedback_node"})
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e)) from e
-        return {"status": "learned", "learned": True, "accepted": True, "source": "metadata_generated", "record": record.model_dump(mode="json")}
+        return {"status": "learned", "learned": True, "accepted": True, "source": "metadata_generated", "rag_indexed": True, "record": record.model_dump(mode="json")}
     if req.product not in config.products:
         raise HTTPException(status_code=404, detail=f"产品不存在: {req.product}")
 
@@ -235,6 +277,19 @@ async def learn_sql(req: SQLLearnRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
     return {"status": "learned", "record": record.model_dump(mode="json")}
+
+
+@router.get("/runs/{run_id}")
+async def get_agent_run(run_id: str):
+    state = _get_app_state()
+    storage = state.get("storage")
+    if not (storage and storage.is_database_mode):
+        raise HTTPException(status_code=400, detail="agent runs require database mode")
+    with storage.database.session() as session:
+        run = AgentRunRepository(session).get(run_id)
+        if not run:
+            raise HTTPException(status_code=404, detail=f"agent run not found: {run_id}")
+        return run
 
 
 def _merge_metadata_hits(primary: list[dict], secondary: list[dict], intent: list[dict] | None = None) -> list[dict]:

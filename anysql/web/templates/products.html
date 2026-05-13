@@ -60,6 +60,18 @@
                 </div>
                 <div id="tableProfiles" class="profile-list"></div>
             </div>
+
+            <div class="profile-panel">
+                <div class="side-label">RAG</div>
+                <div class="profile-actions">
+                    <button type="button" class="btn btn-outline icon-btn" onclick="loadRagStats()" title="Stats"><i class="fas fa-chart-simple"></i></button>
+                    <button type="button" class="btn btn-outline icon-btn" onclick="rebuildRag(this)" title="Rebuild RAG"><i class="fas fa-brain"></i></button>
+                    <input id="joinSearch" placeholder="JOIN edge">
+                    <button type="button" class="btn btn-outline icon-btn" onclick="loadJoinEdges()" title="JOIN"><i class="fas fa-link"></i></button>
+                </div>
+                <div id="ragStats" class="profile-list"></div>
+                <div id="joinEdges" class="profile-list"></div>
+            </div>
         </section>
     </div>
 </div>
@@ -264,6 +276,50 @@ async function rebuildProfiles(btn) {
         return;
     }
     await loadTableProfiles();
+}
+
+async function loadRagStats() {
+    const code = document.getElementById('productForm').elements.code.value;
+    if (!code) return;
+    const res = await fetch(`/api/products/${encodeURIComponent(code)}/rag/stats`);
+    const el = document.getElementById('ragStats');
+    if (!res.ok) {
+        el.innerHTML = '';
+        return;
+    }
+    const stats = await res.json();
+    const nodes = stats.nodes || {};
+    el.innerHTML = `<div class="profile-row"><div><strong>${stats.total_nodes || 0} nodes / ${stats.embeddings || 0} vectors</strong><small>${escapeHtml(JSON.stringify(nodes))}</small><small>${escapeHtml(stats.updated_at || '')}</small></div></div>`;
+}
+
+async function rebuildRag(btn) {
+    const code = document.getElementById('productForm').elements.code.value;
+    if (!code) return;
+    const original = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+    const res = await fetch(`/api/products/${encodeURIComponent(code)}/rag/rebuild`, { method: 'POST' });
+    btn.disabled = false;
+    btn.innerHTML = original;
+    if (!res.ok) {
+        alert(await res.text());
+        return;
+    }
+    await loadRagStats();
+}
+
+async function loadJoinEdges() {
+    const code = document.getElementById('productForm').elements.code.value;
+    if (!code) return;
+    const q = document.getElementById('joinSearch').value || '';
+    const res = await fetch(`/api/products/${encodeURIComponent(code)}/join-edges?q=${encodeURIComponent(q)}&limit=40`);
+    const el = document.getElementById('joinEdges');
+    if (!res.ok) {
+        el.innerHTML = '';
+        return;
+    }
+    const rows = await res.json();
+    el.innerHTML = rows.map(edge => `<div class="profile-row"><div><strong>${escapeHtml(edge.from_table)}.${escapeHtml(edge.from_column)} -> ${escapeHtml(edge.to_table)}.${escapeHtml(edge.to_column)}</strong><small>${escapeHtml(edge.source)} / ${Math.round((edge.confidence || 0) * 100)}% / ${escapeHtml(edge.reason || '')}</small></div></div>`).join('');
 }
 
 document.getElementById('profileSearch').addEventListener('keydown', event => {

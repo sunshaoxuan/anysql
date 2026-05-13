@@ -195,6 +195,15 @@ class SQLAssistantResponse(BaseModel):
     matches: list[SQLCandidateMatch] = Field(default_factory=list)
     record: SQLRecord
     learned: bool = False
+    agent_run_id: Optional[str] = None
+    intent_plan: dict = Field(default_factory=dict)
+    evidence_bundles: list[dict] = Field(default_factory=list)
+    context_budget: dict = Field(default_factory=dict)
+    retrieval_scores: list[dict] = Field(default_factory=list)
+    validation_result: dict = Field(default_factory=dict)
+    repair_count: int = 0
+    llm_call_count: int = 0
+    invalid_reason: str = ""
 
 
 class SQLLearnRequest(BaseModel):

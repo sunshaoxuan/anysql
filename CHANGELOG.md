@@ -2,6 +2,27 @@
 
 All notable changes to AnySQL are documented in this file.
 
+## [0.5.0] - 2026-05-13
+
+### Added
+
+- Added a Harness Agent foundation with intent planning, evidence bundles, validation results, run IDs, and LLM call accounting on assistant responses.
+- Added multi-dimensional RAG storage: `rag_nodes`, `rag_embeddings`, `rag_terms`, `join_edges`, `agent_runs`, `agent_steps`, and `feedback_events`.
+- Added product APIs for RAG rebuild/stats and join edge inspection/editing.
+- Added agent run audit API at `GET /api/agent-runs/{run_id}`.
+- Added immediate positive-feedback RAG nodes and embeddings when users accept generated SQL.
+- Added Product UI controls for RAG rebuild/stats and join edge inspection.
+
+### Changed
+
+- Database-mode assistant requests now use an evidence-first Harness Agent path before falling back to the legacy flow.
+- Metadata sync and embedding rebuild jobs now prepare multi-dimensional RAG nodes in addition to legacy pgvector embeddings.
+- Assistant UI now displays intent/evidence/validation summaries and hides acceptance when validation fails.
+
+### Fixed
+
+- Added deterministic validation gates for evidence-table drift, unknown evidence fields, missing name conditions, and unsafe generated parameter names.
+
 ## [0.4.0] - 2026-05-13
 
 ### Added

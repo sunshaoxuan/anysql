@@ -7,10 +7,13 @@ from __future__ import annotations
 from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
+from sqlalchemy import select
 
 from anysql.config import DatabaseConfig, ProductConfig, save_config
 from anysql.logger import logger
 from anysql.models.schemas import ProductInfo, ProductUpsertRequest
+from anysql.storage.models import JoinEdge
+from anysql.storage.rag_repository import RagRepository
 from anysql.storage.repositories import JobRepository, ProductRepository, SQLKnowledgeRepository, TableProfileRepository
 
 router = APIRouter(prefix="/api/products", tags=["products"])
@@ -258,6 +261,100 @@ async def rebuild_table_profiles(product_id: str):
             raise HTTPException(status_code=404, detail=f"产品不存在: {product_id}")
         count = TableProfileRepository(session).rebuild_auto(product.id)
         return {"status": "rebuilt", "profiled_count": count}
+
+
+@router.post("/{product_id}/rag/rebuild")
+async def rebuild_rag(product_id: str):
+    state = _get_app_state()
+    storage = state.get("storage")
+    if not (storage and storage.is_database_mode):
+        raise HTTPException(status_code=400, detail="RAG requires database mode")
+    with storage.database.session() as session:
+        product = ProductRepository(session).get_by_code(product_id)
+        if not product:
+            raise HTTPException(status_code=404, detail=f"产品不存在: {product_id}")
+        rag = RagRepository(session)
+        node_count = rag.rebuild_metadata_nodes(product.id)
+        embedding_count = await rag.index_nodes(product.id, state["llm"], state["config"].llm.embed_model)
+        return {"status": "rebuilt", "node_count": node_count, "embedding_count": embedding_count, "stats": rag.stats(product.id)}
+
+
+@router.get("/{product_id}/rag/stats")
+async def rag_stats(product_id: str):
+    state = _get_app_state()
+    storage = state.get("storage")
+    if not (storage and storage.is_database_mode):
+        raise HTTPException(status_code=400, detail="RAG requires database mode")
+    with storage.database.session() as session:
+        product = ProductRepository(session).get_by_code(product_id)
+        if not product:
+            raise HTTPException(status_code=404, detail=f"产品不存在: {product_id}")
+        return RagRepository(session).stats(product.id)
+
+
+@router.get("/{product_id}/join-edges")
+async def list_join_edges(product_id: str, q: str = "", limit: int = 200):
+    state = _get_app_state()
+    storage = state.get("storage")
+    if not (storage and storage.is_database_mode):
+        raise HTTPException(status_code=400, detail="join edges require database mode")
+    with storage.database.session() as session:
+        product = ProductRepository(session).get_by_code(product_id)
+        if not product:
+            raise HTTPException(status_code=404, detail=f"产品不存在: {product_id}")
+        query = select(JoinEdge).where(JoinEdge.product_id == product.id)
+        if q:
+            like = f"%{q.upper()}%"
+            query = query.where(
+                (JoinEdge.from_table.ilike(like))
+                | (JoinEdge.from_column.ilike(like))
+                | (JoinEdge.to_table.ilike(like))
+                | (JoinEdge.to_column.ilike(like))
+            )
+        rows = list(session.scalars(query.order_by(JoinEdge.confidence.desc(), JoinEdge.from_table).limit(limit)))
+        return [
+            {
+                "id": row.id,
+                "from_table": row.from_table,
+                "from_column": row.from_column,
+                "to_table": row.to_table,
+                "to_column": row.to_column,
+                "confidence": row.confidence,
+                "source": row.source,
+                "reason": row.reason,
+            }
+            for row in rows
+        ]
+
+
+@router.patch("/{product_id}/join-edges/{edge_id}")
+async def update_join_edge(product_id: str, edge_id: str, payload: dict):
+    state = _get_app_state()
+    storage = state.get("storage")
+    if not (storage and storage.is_database_mode):
+        raise HTTPException(status_code=400, detail="join edges require database mode")
+    with storage.database.session() as session:
+        product = ProductRepository(session).get_by_code(product_id)
+        if not product:
+            raise HTTPException(status_code=404, detail=f"产品不存在: {product_id}")
+        edge = session.get(JoinEdge, edge_id)
+        if not edge or edge.product_id != product.id:
+            raise HTTPException(status_code=404, detail=f"join edge not found: {edge_id}")
+        edge.confidence = float(payload.get("confidence", edge.confidence))
+        edge.source = "manual"
+        edge.reason = str(payload.get("reason", edge.reason or "manual override"))
+        edge.updated_by = str(payload.get("updated_by", "system"))
+        session.flush()
+        return {
+            "id": edge.id,
+            "from_table": edge.from_table,
+            "from_column": edge.from_column,
+            "to_table": edge.to_table,
+            "to_column": edge.to_column,
+            "confidence": edge.confidence,
+            "source": edge.source,
+            "reason": edge.reason,
+        }
 
 
 @router.get("/{product_id}/sqls")

@@ -16,6 +16,9 @@ AnySQL is a FastAPI-based platform for analyzing SQL assets with an LLM, indexin
 - Product management for adding/editing product definitions and always-on product rules used as LLM guardrails.
 - Japanese is the retrieval pivot language because product metadata is usually stored in Japanese; non-Japanese user requests are normalized before retrieval.
 - Product metadata can be vectorized for RAG and used alongside known SQL examples.
+- Harness Agent workflow: AnySQL now prepares intent plans, evidence bundles, retrieval score details, validation results, and audit runs before asking the LLM to generate SQL.
+- Multi-dimensional RAG knowledge: table profiles, table semantics, field semantics, field traits, accepted SQL intent/structure, predicate patterns, business terms, and feedback are stored as independent retrievable nodes.
+- Positive feedback is immediately persisted: accepted SQL creates SQL, predicate, and feedback RAG nodes plus pgvector embeddings before the learn request returns.
 - New products automatically start an initial Metadata sync from the configured database; later syncs are differential, can be triggered manually, and also run daily while the service is running.
 - Generated or revised SQL is returned as a draft and is only written to the knowledge base after explicit user acceptance.
 - Web UI for search, product status, and analysis progress.
@@ -124,6 +127,11 @@ Generated drafts such as `generated.sql` and `_generated_*.json` are skipped unl
 - `POST /api/generate/sql`
 - `POST /api/assistant/sql`
 - `POST /api/assistant/learn`
+- `GET /api/agent-runs/{run_id}`
+- `POST /api/products/{product_id}/rag/rebuild`
+- `GET /api/products/{product_id}/rag/stats`
+- `GET /api/products/{product_id}/join-edges`
+- `PATCH /api/products/{product_id}/join-edges/{edge_id}`
 - `POST /api/analysis/{product}/metadata-index`
 - `POST /api/analysis/{product}/metadata-sync`
 - `GET /api/analysis/{product}/metadata-sync`
@@ -132,12 +140,13 @@ Generated drafts such as `generated.sql` and `_generated_*.json` are skipped unl
 
 `POST /api/assistant/sql` is the main user workflow. It is intentionally limited to SQL assistance:
 
-1. Retrieve candidate SQL by semantic search.
-2. Ask the LLM to score whether each candidate satisfies the user's requirement.
-3. Return an existing SQL when the LLM match score is high enough.
-4. Generate a new SQL from product metadata and known SQL knowledge when no candidate is good enough.
-5. Revise the current SQL when the user sends corrections or follow-up requirements.
-6. Persist accepted generated or revised SQL to PostgreSQL and update pgvector embeddings.
+1. Build a structured intent plan and preserve requested conditions.
+2. Retrieve multi-dimensional evidence from table/field/profile/predicate/feedback RAG nodes.
+3. Fuse vector and text evidence with RRF and build a constrained context bundle.
+4. Return an accepted SQL when the match score is high enough.
+5. Generate or revise a draft from the evidence bundle when no accepted SQL is strong enough.
+6. Validate table/field/condition drift before showing an accept action.
+7. Persist accepted SQL and immediately update SQL, predicate, feedback, and vector knowledge for the next request.
 
 ### Generate SQL and Learn
 

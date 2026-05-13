@@ -8,6 +8,7 @@ The service supports:
 
 - Shared product definitions, prompt rules, metadata snapshots, SQL knowledge, drafts, and job history.
 - SQL-only chat workflows that retrieve, score, generate, revise, and explicitly accept SQL.
+- Evidence-first Harness Agent workflows that prepare intent plans, multi-dimensional RAG evidence, validation results, and audit steps before SQL generation.
 - Background metadata sync, SQL analysis, and embedding rebuild jobs outside API request threads.
 - Durable container rebuilds through mapped host data under `deploy-data`.
 - No login in the first team release, with `created_by`, `updated_by`, and `accepted_by` fields reserved for later auth/audit integration.
@@ -50,6 +51,11 @@ PostgreSQL owns canonical data:
 - `knowledge_acceptances`: explicit acceptance audit records.
 - `jobs`: queued/running/succeeded/failed/cancelled task status and progress.
 - `sql_embeddings` and `metadata_embeddings`: pgvector-backed semantic retrieval data.
+- `rag_nodes` and `rag_embeddings`: rebuildable multi-dimensional RAG nodes for table profiles, table semantics, column semantics, column traits, accepted SQL intent/structure, predicate patterns, business terms, and feedback.
+- `rag_terms`: product-scoped business term and synonym mappings.
+- `join_edges`: explicit or inferred join paths with confidence and source.
+- `agent_runs` and `agent_steps`: durable audit trail for each Harness Agent request.
+- `feedback_events`: positive/negative human feedback used for future retrieval weighting.
 
 Files are not canonical knowledge in team mode. They are used for imports, exports, and diagnostics.
 
@@ -59,15 +65,17 @@ Generated SQL does not enter `sql_records` or `sql_embeddings` automatically. Th
 
 This prevents bad generated SQL from polluting retrieval results.
 
+Accepted SQL now also creates high-weight RAG nodes synchronously before `POST /api/assistant/learn` returns. The next assistant request can immediately retrieve the accepted SQL intent, structure, predicate pattern, and feedback node.
+
 ## Retrieval Flow
 
-1. Normalize non-Japanese questions toward Japanese because UPDS metadata is Japanese.
-2. Search accepted SQL embeddings in `sql_embeddings`.
-3. Search metadata embeddings in `metadata_embeddings`.
-4. Ask the LLM to score candidate SQL match quality.
-5. Return a matched SQL when confidence is high enough.
-6. Generate a draft from metadata RAG and known SQL examples when confidence is low.
-7. Persist only after human acceptance.
+1. Build an `IntentPlan` with entities, requested filters, output fields, sorting, aggregation, and table-role constraints.
+2. Retrieve evidence from table profiles, table nodes, field nodes, predicate nodes, accepted SQL nodes, feedback nodes, and fuzzy text matches.
+3. Fuse evidence with reciprocal-rank style scoring so a single high vector score cannot dominate table choice by itself.
+4. Build a constrained context bundle that includes only allowed tables, fields, predicates, joins, rules, and accepted examples.
+5. Ask the LLM to generate a structured SQL draft from the bundle.
+6. Run deterministic validation for table drift, field drift, missing conditions, unsafe parameters, and join gaps.
+7. Repair deterministically or with at most one additional LLM call; otherwise return an invalid draft without an accept action.
 
 ## Background Jobs
 
@@ -77,6 +85,7 @@ Long jobs run through Redis/RQ and persist state in `jobs`:
 - `metadata_delta_sync`: enqueued manually and by the daily scheduler.
 - `sql_analysis`: imports/analyzes SQL files.
 - `embedding_rebuild`: rebuilds SQL and metadata embeddings.
+- `rag/rebuild`: API-triggered rebuild of multi-dimensional RAG nodes and embeddings.
 
 Job statuses are `queued`, `running`, `succeeded`, `failed`, and `cancelled`.
 

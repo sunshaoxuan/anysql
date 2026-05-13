@@ -208,6 +208,10 @@ function renderRecord(response) {
     const stmt = record.statement || {};
     const snapshot = record.metadata_snapshot || {};
     const warnings = snapshot.validation_warnings || [];
+    const intentPlan = response.intent_plan || snapshot.intent_plan || {};
+    const bundles = response.evidence_bundles || snapshot.evidence_bundles || [];
+    const validation = response.validation_result || snapshot.validation_result || {};
+    const invalidReason = response.invalid_reason || '';
     currentSqlId = stmt.id;
     currentSql = decodeHtmlEntities(stmt.raw_sql || '');
 
@@ -237,9 +241,34 @@ function renderRecord(response) {
         </div>
         <h3>${escapeHtml(analysis.summary || 'SQL')}</h3>
         <p>${escapeHtml((analysis.business_context || []).join(' / '))}</p>
+        ${renderEvidenceSummary(intentPlan, bundles, validation, response)}
+        ${invalidReason ? `<p class="side-muted">${escapeHtml(invalidReason)}</p>` : ''}
         ${warnings.length ? `<p class="side-muted">${escapeHtml(warnings.join(' / '))}</p>` : ''}
-        ${response.learned || response.mode === 'matched' || warnings.length ? '' : `<button class="btn btn-primary icon-btn" onclick="acceptCurrentSql(this)" title="${escapeHtml(t('accept'))}"><i class="fas fa-thumbs-up"></i></button>`}
+        ${response.learned || response.mode === 'matched' || warnings.length || invalidReason ? '' : `<button class="btn btn-primary icon-btn" onclick="acceptCurrentSql(this)" title="${escapeHtml(t('accept'))}"><i class="fas fa-thumbs-up"></i></button>`}
     `);
+}
+
+function renderEvidenceSummary(intentPlan, bundles, validation, response) {
+    const intents = (intentPlan.units || []).map(unit => unit.name).filter(Boolean).join(' / ');
+    const tableNames = [];
+    (bundles || []).forEach(bundle => (bundle.recommended_tables || []).slice(0, 3).forEach(item => {
+        if (item.table && !tableNames.includes(item.table)) tableNames.push(item.table);
+    }));
+    const fields = [];
+    (bundles || []).forEach(bundle => (bundle.recommended_fields || []).slice(0, 6).forEach(item => {
+        const label = item.table && item.column ? `${item.table}.${item.column}` : item.column;
+        if (label && !fields.includes(label)) fields.push(label);
+    }));
+    if (!intents && !tableNames.length && !fields.length) return '';
+    const parts = [
+        intents ? `Intent: ${intents}` : '',
+        tableNames.length ? `Tables: ${tableNames.join(', ')}` : '',
+        fields.length ? `Fields: ${fields.join(', ')}` : '',
+        response.agent_run_id ? `Run: ${response.agent_run_id}` : '',
+        response.llm_call_count ? `LLM: ${response.llm_call_count}` : ''
+    ].filter(Boolean);
+    const validText = validation && validation.valid === false ? 'INVALID' : 'VERIFIED';
+    return `<p class="side-muted">${escapeHtml(validText + ' / ' + parts.join(' / '))}</p>`;
 }
 
 async function acceptCurrentSql(btn) {
@@ -271,7 +300,7 @@ async function acceptCurrentSql(btn) {
     renderRecord({
         product,
         mode: 'learned',
-        message: t('accept'),
+        message: `${t('accept')} / RAG ready for next request`,
         matches: currentResponse.matches || [],
         record: data.record,
         learned: true

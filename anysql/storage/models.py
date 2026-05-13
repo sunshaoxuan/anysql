@@ -231,3 +231,106 @@ class MetadataEmbedding(Base, TimestampMixin):
     document: Mapped[str] = mapped_column(Text, nullable=False)
     meta: Mapped[dict] = mapped_column(JSON, default=dict)
     embedding: Mapped[list[float]] = mapped_column(Vector(EMBEDDING_DIMENSION))
+
+
+class RagNode(Base, TimestampMixin):
+    __tablename__ = "rag_nodes"
+    __table_args__ = (UniqueConstraint("product_id", "source_type", "source_id", "facet", name="uq_rag_node_source_facet"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=new_id)
+    product_id: Mapped[str] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    source_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    facet: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    lang: Mapped[str] = mapped_column(String(16), default="ja", index=True)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    meta: Mapped[dict] = mapped_column(JSON, default=dict)
+    content_hash: Mapped[str] = mapped_column(String(64), default="", index=True)
+    weight: Mapped[float] = mapped_column(Float, default=1.0)
+    source_version: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class RagEmbedding(Base, TimestampMixin):
+    __tablename__ = "rag_embeddings"
+    __table_args__ = (UniqueConstraint("node_id", "embedding_model", name="uq_rag_embedding_node_model"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=new_id)
+    node_id: Mapped[str] = mapped_column(ForeignKey("rag_nodes.id", ondelete="CASCADE"), nullable=False, index=True)
+    product_id: Mapped[str] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"), nullable=False, index=True)
+    facet: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    embedding_model: Mapped[str] = mapped_column(String(128), nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    embedding: Mapped[list[float]] = mapped_column(Vector(EMBEDDING_DIMENSION))
+
+
+class RagTerm(Base, TimestampMixin):
+    __tablename__ = "rag_terms"
+    __table_args__ = (UniqueConstraint("product_id", "term", "lang", name="uq_rag_term_product_lang"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=new_id)
+    product_id: Mapped[str] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"), nullable=False, index=True)
+    term: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    lang: Mapped[str] = mapped_column(String(16), default="ja", index=True)
+    synonyms: Mapped[list] = mapped_column(JSON, default=list)
+    domain: Mapped[str] = mapped_column(String(64), default="unknown", index=True)
+    source: Mapped[str] = mapped_column(String(32), default="system")
+
+
+class JoinEdge(Base, TimestampMixin):
+    __tablename__ = "join_edges"
+    __table_args__ = (UniqueConstraint("product_id", "from_table", "from_column", "to_table", "to_column", name="uq_join_edge_columns"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=new_id)
+    product_id: Mapped[str] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"), nullable=False, index=True)
+    from_table: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    from_column: Mapped[str] = mapped_column(String(255), nullable=False)
+    to_table: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    to_column: Mapped[str] = mapped_column(String(255), nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    source: Mapped[str] = mapped_column(String(32), default="auto", index=True)
+    reason: Mapped[str] = mapped_column(Text, default="")
+    updated_by: Mapped[str] = mapped_column(String(128), default="system")
+
+
+class AgentRun(Base, TimestampMixin):
+    __tablename__ = "agent_runs"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=new_id)
+    product_id: Mapped[str] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"), nullable=False, index=True)
+    session_id: Mapped[str | None] = mapped_column(String(128), index=True)
+    requirement: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="running", index=True)
+    intent_plan: Mapped[dict] = mapped_column(JSON, default=dict)
+    evidence_bundles: Mapped[list] = mapped_column(JSON, default=list)
+    retrieval_scores: Mapped[list] = mapped_column(JSON, default=list)
+    validation_result: Mapped[dict] = mapped_column(JSON, default=dict)
+    context_budget: Mapped[dict] = mapped_column(JSON, default=dict)
+    llm_call_count: Mapped[int] = mapped_column(Integer, default=0)
+    repair_count: Mapped[int] = mapped_column(Integer, default=0)
+    invalid_reason: Mapped[str] = mapped_column(Text, default="")
+
+
+class AgentStep(Base, TimestampMixin):
+    __tablename__ = "agent_steps"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=new_id)
+    run_id: Mapped[str] = mapped_column(ForeignKey("agent_runs.id", ondelete="CASCADE"), nullable=False, index=True)
+    step_name: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), default="succeeded")
+    input: Mapped[dict] = mapped_column(JSON, default=dict)
+    output: Mapped[dict] = mapped_column(JSON, default=dict)
+    error: Mapped[str] = mapped_column(Text, default="")
+
+
+class FeedbackEvent(Base, TimestampMixin):
+    __tablename__ = "feedback_events"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=new_id)
+    product_id: Mapped[str] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"), nullable=False, index=True)
+    run_id: Mapped[str | None] = mapped_column(ForeignKey("agent_runs.id", ondelete="SET NULL"), index=True)
+    sql_id: Mapped[str | None] = mapped_column(ForeignKey("sql_records.id", ondelete="SET NULL"), index=True)
+    requirement: Mapped[str] = mapped_column(Text, default="")
+    feedback_type: Mapped[str] = mapped_column(String(32), default="accepted", index=True)
+    weight: Mapped[float] = mapped_column(Float, default=1.0)
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_by: Mapped[str] = mapped_column(String(128), default="system")
