@@ -16,8 +16,7 @@
         </a>
         <div class="header-tagline" data-i18n="homeLead">SQLに限定した検索・生成・修正ワークベンチ。</div>
         <div style="display: flex; gap: 1.5rem; align-items: center;">
-            <a href="/products" class="icon-nav" title="プロダクト管理"><i class="fas fa-database"></i></a>
-            <a href="/analysis" class="icon-nav" title="分析ダッシュボード"><i class="fas fa-chart-line"></i></a>
+            <a href="/products" class="icon-nav" data-i18n-title="knowledgeManagement" title="プロダクト / 知識管理"><i class="fas fa-database"></i></a>
             <select id="langSelect" class="lang-select" title="Language">
                 <option value="ja">日本語</option>
                 <option value="zh">中文</option>
@@ -34,7 +33,7 @@
         const I18N = {
             ja: {
                 productManagement: 'プロダクト管理',
-                analysisDashboard: '分析ダッシュボード',
+                knowledgeManagement: 'プロダクト / 知識管理',
                 sqlAssistant: 'SQL Assistant',
                 homeLead: 'SQLに限定した検索・生成・修正ワークベンチ。',
                 welcome: '条件を入力してください。高一致のSQLがあれば再利用し、足りなければMetadataから作成して知識化します。',
@@ -82,7 +81,7 @@
             },
             zh: {
                 productManagement: '产品管理',
-                analysisDashboard: '分析面板',
+                knowledgeManagement: '产品 / 知识管理',
                 sqlAssistant: 'SQL 助手',
                 homeLead: '仅面向 SQL 的检索、生成与修正工作台。',
                 welcome: '请输入业务条件。高匹配时复用已有 SQL，不足时基于 Metadata 生成并沉淀为知识。',
@@ -130,7 +129,7 @@
             },
             en: {
                 productManagement: 'Products',
-                analysisDashboard: 'Analysis',
+                knowledgeManagement: 'Products / Knowledge',
                 sqlAssistant: 'SQL Assistant',
                 homeLead: 'A SQL-only workbench for matching, generation, and revision.',
                 welcome: 'Describe the business condition. High-confidence matches reuse known SQL; otherwise AnySQL generates and learns a new one.',

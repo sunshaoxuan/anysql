@@ -18,6 +18,8 @@ All notable changes to AnySQL are documented in this file.
 - Database-mode assistant requests now use an evidence-first Harness Agent path before falling back to the legacy flow.
 - Metadata sync and embedding rebuild jobs now prepare multi-dimensional RAG nodes in addition to legacy pgvector embeddings.
 - Assistant UI now displays intent/evidence/validation summaries and hides acceptance when validation fails.
+- Merged the old Analysis dashboard navigation into the Product / Knowledge management entry; SQL analysis can now be started from the product page.
+- Updated operation and design docs to reflect Harness Agent, RAG, Docker port 8765, and test-data cleanup rules.
 
 ### Fixed
 

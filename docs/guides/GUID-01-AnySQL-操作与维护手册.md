@@ -1,47 +1,88 @@
 # GUIDE-01 AnySQL 操作与维护手册
 
-**生效日期**: 2026-05-12  
+**生效日期**: 2026-05-13  
 **状态**: 执行中
 
----
+## 1. 启动方式
 
-## 1. 系统启动
-执行以下命令启动 Web 服务：
+本地开发：
+
 ```powershell
-# 推荐端口为 8768 (或 8765-8767 视占用情况而定)
-python -m uvicorn anysql.main:app --host 127.0.0.1 --port 8768
+python -m uvicorn anysql.main:app --host 127.0.0.1 --port 8765
 ```
 
-## 2. 核心工作流
+团队版 Docker Compose：
 
-### 2.1 触发 SQL 扫描与解析
-1. 访问导航栏的 **[分析ダッシュボード]**。
-2. 找到目标产品（如 `UPDS`）。
-3. 点击 **[解析開始]**。
-    - **注意**: 建议首次运行或变更 SQL 文件后点击以更新 AI 索引。
-    - 进度条会实时更新解析成功的 SQL 数量。
+```powershell
+docker compose up -d --build
+```
 
-### 2.2 搜索与检索
-1. 在首页搜索框输入**自然语言**（如：“查看员工异动记录” 或 “マスタ取得”）。
-2. 点击 **[検索]**。
-3. 在结果卡片中：
-    - 直接查看 SQL 预览。
-    - 点击右上角 **[Copy]** 按钮快速复制。
-    - 点击 **[詳細]** 查看 AI 深度解析和涉及的表结构。
+默认访问地址为 `http://127.0.0.1:8765`。生产数据位于 `deploy-data/`，重建容器不会删除历史数据。
 
-## 3. 维护与故障排除
+## 2. 日常入口
 
-### 3.1 进度条卡住怎么办？
-- **排查**: 检查 `data/logs/` 下的最新日志。
-- **解决**: 
-    1. 确保 Ollama/LLM 服务正在运行。
-    2. 尝试点击 **[再解析]** 强制刷新状态。
+- 首页 `/`: SQL Assistant 工作台。
+- 产品 / 知识管理 `/products`: 产品配置、数据库连接、Metadata 同步、SQL 解析、表角色、RAG、Join Edge 管理。
+- 旧分析页 `/analysis`: 仅作为兼容页面保留，不再作为主要操作入口。
 
-### 3.2 搜不到新加入的 SQL？
-- **原因**: 向量索引（Vector Index）尚未重建。
-- **解决**: 在“分析仪表板”完成一次解析流程，系统会自动在最后阶段重建搜索索引。
+右上角只保留“产品 / 知识管理”入口。SQL 解析、Metadata 同步、RAG 重建都在产品页完成。
 
-## 4. 目录结构说明
-- `/products/{name}/sql`: 存放原始 SQL 文件。
-- `/products/{name}/metadata`: 存放数据库元数据缓存。
-- `/products/{name}/desc`: 存放 AI 生成的 JSON 分析记录。
+## 3. 核心工作流
+
+### 3.1 配置产品
+
+1. 打开 `/products`。
+2. 新增或编辑产品。
+3. 填写 Code、名称、规则、目录和数据库连接资料。
+4. 保存后，新产品会自动触发 Metadata 同步任务。
+
+产品规则会作为 Harness Agent 的固定上下文限制，始终参与 SQL 生成。
+
+### 3.2 同步 Metadata
+
+在产品页点击 Metadata 同步按钮。后台会：
+
+- 从产品数据库抽取 Metadata。
+- 更新 `metadata_tables` / `metadata_columns`。
+- 重建表角色 profile。
+- 更新 metadata 向量。
+- 生成多维 RAG 节点。
+
+### 3.3 重建 RAG
+
+在产品页 RAG 区点击重建按钮。系统会从 PostgreSQL 事实源重建：
+
+- table profile / table semantic 节点。
+- column semantic / column stat 节点。
+- predicate pattern / business term 节点。
+- 对应 pgvector embedding。
+
+RAG 节点是可重建缓存，不是事实源。
+
+### 3.4 SQL Assistant
+
+1. 在首页选择产品。
+2. 输入 SQL 需求。
+3. 系统先拆解 intent，再准备 evidence bundle。
+4. 大模型只根据受控上下文生成 SQL。
+5. 校验不通过的 draft 不显示采纳按钮。
+6. 人工采纳后，accepted SQL 会立即生成正反馈 RAG 节点并写入向量，下一轮请求可直接利用。
+
+## 4. 测试数据清理
+
+测试或 smoke test 后必须确认：
+
+```sql
+select count(*) from sql_drafts;
+select count(*) from agent_runs;
+select count(*) from agent_steps;
+select count(*) from feedback_events;
+```
+
+测试产生的 draft、agent run、agent step 应清理。真实 Metadata、表角色 profile、accepted SQL 不应删除。
+
+## 5. 常见问题
+
+- RAG stats 为 0：说明尚未全量重建 RAG；assistant 会使用 legacy metadata/profile evidence fallback，但建议在产品页执行 RAG rebuild。
+- SQL 解析按钮：只用于导入/分析原始 SQL 文件，不等同于 Metadata 同步。
+- 采纳失败：通常是 draft 存在 validation warning，需先修正 SQL。

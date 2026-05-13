@@ -78,8 +78,7 @@ python -m uvicorn anysql.main:app --host 127.0.0.1 --port 8765
 Then open:
 
 - Search UI: `http://127.0.0.1:8765/`
-- Product page: `http://127.0.0.1:8765/products`
-- Analysis dashboard: `http://127.0.0.1:8765/analysis`
+- Product / knowledge page: `http://127.0.0.1:8765/products`
 
 The main SQL assistant UI is desktop-first and targets screens of at least 1024px width.
 AnySQL does not require user login in the current local deployment model.
