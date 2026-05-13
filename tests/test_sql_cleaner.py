@@ -117,6 +117,13 @@ def test_preserve_requirement_literal_replaces_bare_name_parameter():
     )
 
 
+def test_preserve_requirement_literal_turns_surname_like_into_prefix_match():
+    sql = "SELECT CSHAINNO, CNAMEKNJ, DNINYO_DTE FROM DJND3001 WHERE CNAMEKNJ LIKE '村田'"
+    assert preserve_requirement_literal(sql, "查所有姓“村田”的非常勤職員的入职日") == (
+        "SELECT CSHAINNO, CNAMEKNJ, DNINYO_DTE FROM DJND3001 WHERE CNAMEKNJ LIKE '村田%';"
+    )
+
+
 def test_preserve_requirement_literal_removes_unrequested_parameter_filter_for_all_records():
     sql = "SELECT CSHAINNO, HTREINGB_DTE FROM DKIDO_R WHERE CSHAINNO LIKE :1"
     assert preserve_requirement_literal(sql, "查所有的异动记录") == "SELECT CSHAINNO, HTREINGB_DTE FROM DKIDO_R;"

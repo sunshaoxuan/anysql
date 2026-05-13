@@ -359,6 +359,34 @@ body {
     font-size: 0.86rem;
 }
 
+.assistant-meta {
+    margin-top: 0.7rem;
+    padding-top: 0.65rem;
+    border-top: 1px solid var(--border);
+    display: grid;
+    gap: 0.28rem;
+    color: var(--text-sub);
+    font-size: 0.78rem;
+    line-height: 1.45;
+}
+
+.assistant-meta div {
+    display: grid;
+    grid-template-columns: 5.6rem minmax(0, 1fr);
+    gap: 0.45rem;
+}
+
+.assistant-meta span {
+    color: var(--text-light);
+}
+
+.assistant-meta strong {
+    min-width: 0;
+    color: var(--text-sub);
+    font-weight: 500;
+    overflow-wrap: anywhere;
+}
+
 .result-head,
 .result-actions {
     display: flex;

@@ -80,6 +80,12 @@ def preserve_requirement_literal(sql: str, requirement: str, allow_aliases: bool
     text = re.sub(r"LIKE\s+'%{2,}'", f"LIKE '{escaped}%'", text, flags=re.IGNORECASE)
     if any(word in str(requirement or "") for word in ("姓", "姓名", "名字", "氏名")):
         text = re.sub(
+            rf"((?:C?NAME|KANJI|KANA|MEI|SHIMEI|SIMEI|氏名)[\w.]*\s+LIKE\s+)'{re.escape(escaped)}'",
+            rf"\1'{escaped}%'",
+            text,
+            flags=re.IGNORECASE,
+        )
+        text = re.sub(
             r"((?:C?NAME|KANJI|KANA|MEI|SHIMEI|SIMEI|氏名)[\w.]*\s+LIKE\s+)'[^']*%'",
             rf"\1'{escaped}%'",
             text,

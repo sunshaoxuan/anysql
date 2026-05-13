@@ -308,16 +308,18 @@ function renderEvidenceSummary(intentPlan, bundles, validation, response) {
         if (label && !fields.includes(label)) fields.push(label);
     }));
     const parts = [
-        intents ? `Intent: ${intents}` : '',
-        tableNames.length ? `Tables: ${tableNames.join(', ')}` : '',
-        fields.length ? `Fields: ${fields.join(', ')}` : '',
-        response.agent_run_id ? `Run: ${response.agent_run_id}` : '',
-        response.llm_call_count ? `LLM: ${response.llm_call_count}` : '',
-        response.client_elapsed_ms ? `思考時間: ${formatDuration(response.client_elapsed_ms)}` : ''
+        { label: 'Status', value: validation && validation.valid === false ? 'INVALID' : 'VERIFIED' },
+        intents ? { label: 'Intent', value: intents } : null,
+        tableNames.length ? { label: 'Tables', value: tableNames.join(', ') } : null,
+        fields.length ? { label: 'Fields', value: fields.join(', ') } : null,
+        response.llm_call_count ? { label: 'LLM', value: response.llm_call_count } : null,
+        response.client_elapsed_ms ? { label: '思考時間', value: formatDuration(response.client_elapsed_ms) } : null,
+        response.agent_run_id ? { label: 'Run', value: response.agent_run_id } : null
     ].filter(Boolean);
     if (!parts.length) return '';
-    const validText = validation && validation.valid === false ? 'INVALID' : 'VERIFIED';
-    return `<p class="side-muted">${escapeHtml(validText + ' / ' + parts.join(' / '))}</p>`;
+    return `<div class="assistant-meta">${parts.map(item => `
+        <div><span>${escapeHtml(item.label)}</span><strong>${escapeHtml(String(item.value))}</strong></div>
+    `).join('')}</div>`;
 }
 
 async function acceptCurrentSql(btn) {
