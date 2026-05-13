@@ -317,6 +317,13 @@ body {
     justify-self: end;
 }
 
+.request-options {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: -0.2rem;
+}
+
 .assistant-input textarea {
     resize: vertical;
     min-height: 54px;
