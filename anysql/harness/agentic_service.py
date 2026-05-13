@@ -17,7 +17,7 @@ from anysql.core.table_profiles import policy_for_intent, resolve_intent
 from anysql.models.schemas import Complexity, GeneratedSQL, SQLAnalysis, SQLCandidateMatch, SQLRecord
 from anysql.storage.models import MetadataColumn, MetadataTable
 from anysql.storage.pgvector_engine import PGVectorRepository
-from anysql.storage.rag_repository import AgentRunRepository, RagRepository
+from anysql.storage.rag_repository import AgentRunRepository, KnowledgeGapRepository, RagRepository
 from anysql.storage.repositories import ProductRepository, SQLKnowledgeRepository
 
 
@@ -138,6 +138,8 @@ class HarnessAgentService:
                     if not validation.valid and self._deterministic_repair(record, intent_plan, evidence_bundles):
                         repair_count += 1
                         validation = self.validate_record(record, intent_plan, evidence_bundles)
+            gap_id = None
+            source = ""
             invalid_reason = "; ".join(validation.errors[:3]) if not validation.valid else ""
             record.metadata_snapshot = {
                 **(record.metadata_snapshot or {}),
@@ -147,6 +149,24 @@ class HarnessAgentService:
             with self.storage.database.session() as session:
                 product = ProductRepository(session).get_by_code(req.product)
                 SQLKnowledgeRepository(session).save_draft(product.id, req.message, record, req.session_id)
+                if invalid_reason or _needs_knowledge_gap(intent_plan, evidence_bundles, validation):
+                    gap, created = KnowledgeGapRepository(session).create_or_update(
+                        product.id,
+                        req.message,
+                        run_id,
+                        req.session_id,
+                        invalid_reason or "evidence requires knowledge review",
+                        _gap_trigger_reasons(intent_plan, evidence_bundles, validation),
+                        validation.model_dump(mode="json"),
+                        [bundle.model_dump(mode="json") for bundle in evidence_bundles],
+                        retrieval_scores,
+                    )
+                    gap_id = gap.id
+                    source = "needs_knowledge_review"
+                    record.metadata_snapshot["knowledge_gap_id"] = gap_id
+                    record.metadata_snapshot["source"] = source
+                    if self.storage.queue and (created or gap.status == "queued"):
+                        self.storage.queue.enqueue("anysql.worker_tasks.knowledge_gap_analysis", gap_id)
             harness = self._complete_run(
                 run_id,
                 product_id=None,
@@ -159,8 +179,10 @@ class HarnessAgentService:
                 llm_call_count=llm_call_count,
                 repair_count=repair_count,
                 invalid_reason=invalid_reason,
+                source=source,
+                knowledge_gap_id=gap_id,
             )
-            return HarnessAssistResult("revised" if current_sql else "generated", record, matches, False, harness)
+            return HarnessAssistResult("invalid" if invalid_reason else ("revised" if current_sql else "generated"), record, matches, False, harness)
         except Exception:
             with self.storage.database.session() as session:
                 run_repo = AgentRunRepository(session)
@@ -252,7 +274,7 @@ class HarnessAgentService:
         if re.search(r":[^\s),;]+", strip_sql_comments(record.statement.raw_sql)):
             warnings.append("Parameter names should be ASCII identifiers.")
         unknown_columns = []
-        keywords = {"SELECT", "FROM", "WHERE", "AND", "OR", "LIKE", "BETWEEN", "IN", "IS", "NULL", "NOT", "ORDER", "BY", "GROUP", "HAVING", "UNION", "ALL", "DISTINCT", "AS", "ON", "JOIN", "INNER", "LEFT", "RIGHT", "ASC", "DESC", "TO_DATE"}
+        keywords = {"SELECT", "FROM", "WHERE", "AND", "OR", "LIKE", "BETWEEN", "IN", "IS", "NULL", "NOT", "ORDER", "BY", "GROUP", "HAVING", "UNION", "ALL", "DISTINCT", "AS", "ON", "JOIN", "INNER", "LEFT", "RIGHT", "ASC", "DESC", "COUNT", "SUM", "AVG", "MIN", "MAX", "NVL", "DECODE", "TO_DATE"}
         allowed_all = set().union(*allowed_columns_by_table.values()) if allowed_columns_by_table else set()
         for token in re.findall(r"\b[A-Za-z_][A-Za-z0-9_$#]*\b", sql):
             upper = token.upper()
@@ -270,6 +292,10 @@ class HarnessAgentService:
                 errors.append("Part-time employee hire-date queries must use DJND3001.")
             if not re.search(r"\b(D?NINYO_DTE|SAIYO|HIRE)\b", sql, flags=re.IGNORECASE):
                 errors.append("Hire/appointment date field is missing.")
+        if _needs_dependent_child_evidence(text, evidence_bundles, record):
+            errors.append("Dependent-child/support evidence is insufficient; knowledge review is required.")
+        if resolve_intent(text) == "unknown" and _unknown_intent_is_unsafe(evidence_bundles):
+            errors.append("Unknown intent has insufficient safe business evidence.")
         has_specific_filter = any(condition.get("kind") != "all_records" for condition in intent_plan.conditions)
         if (
             any(word in text for word in ("所有", "全部", "全件", "すべて", "all"))
@@ -354,6 +380,8 @@ class HarnessAgentService:
         llm_call_count: int,
         repair_count: int = 0,
         invalid_reason: str = "",
+        source: str = "",
+        knowledge_gap_id: str | None = None,
     ) -> HarnessResult:
         with self.storage.database.session() as session:
             AgentRunRepository(session).complete(
@@ -378,6 +406,8 @@ class HarnessAgentService:
             repair_count=repair_count,
             llm_call_count=llm_call_count,
             invalid_reason=invalid_reason,
+            source=source,
+            knowledge_gap_id=knowledge_gap_id,
         )
 
 
@@ -426,7 +456,11 @@ def build_evidence_bundles(intent_plan: IntentPlan, evidence: list[dict]) -> lis
             if policy and policy.domain != "unknown":
                 domain = str((item.get("meta") or {}).get("domain") or "")
                 if domain and domain != policy.domain and item.get("facet") in {"table_profile", "table_semantic", "column_semantic"}:
+                    blocked.append(item)
                     continue
+            if not policy and role in {"log", "work", "if_staging", "backup"}:
+                blocked.append(item)
+                continue
             if unit.name == "transfer_records" and table == "XCIDOCHKLOG":
                 blocked.append(item)
                 continue
@@ -533,6 +567,68 @@ def attach_harness_snapshot(record: SQLRecord, intent_plan: IntentPlan, evidence
         "evidence_bundles": [bundle.model_dump(mode="json") for bundle in evidence_bundles],
         "retrieval_scores": retrieval_scores,
     }
+
+
+def _needs_knowledge_gap(intent_plan: IntentPlan, evidence_bundles: list[EvidenceBundle], validation: ValidationResult) -> bool:
+    if not validation.valid:
+        return True
+    if any(unit.name == "unknown" for unit in intent_plan.units) and _unknown_intent_is_unsafe(evidence_bundles):
+        return True
+    if _mentions_dependent_children(intent_plan.original) and _business_field_count(evidence_bundles) < 2:
+        return True
+    return False
+
+
+def _gap_trigger_reasons(intent_plan: IntentPlan, evidence_bundles: list[EvidenceBundle], validation: ValidationResult) -> list[str]:
+    reasons = list(validation.errors)
+    if any(unit.name == "unknown" for unit in intent_plan.units):
+        reasons.append("unknown_intent")
+    if _mentions_dependent_children(intent_plan.original) and _business_field_count(evidence_bundles) < 2:
+        reasons.append("missing_dependent_child_business_evidence")
+    if _unknown_intent_is_unsafe(evidence_bundles):
+        reasons.append("unsafe_or_insufficient_evidence")
+    return list(dict.fromkeys(reasons))
+
+
+def _unknown_intent_is_unsafe(evidence_bundles: list[EvidenceBundle]) -> bool:
+    tables = [table for bundle in evidence_bundles for table in bundle.recommended_tables]
+    fields = [field for bundle in evidence_bundles for field in bundle.recommended_fields]
+    safe_tables = [table for table in tables if str(table.get("role") or "") not in {"log", "work", "if_staging", "backup"}]
+    return not safe_tables or _business_field_count(evidence_bundles) < 2 or _only_employee_number_fields(fields)
+
+
+def _needs_dependent_child_evidence(text: str, evidence_bundles: list[EvidenceBundle], record: SQLRecord) -> bool:
+    if not _mentions_dependent_children(text):
+        return False
+    sql = strip_sql_comments(record.statement.raw_sql)
+    has_business_sql = re.search(r"(FUYOU|FUY|扶養|KAZOKU|FAMILY|CHILD|KODOMO|JIDO|児童|子)", sql, flags=re.IGNORECASE)
+    return not has_business_sql and _business_field_count(evidence_bundles) < 2
+
+
+def _mentions_dependent_children(text: str) -> bool:
+    return any(word in (text or "") for word in ("多子女", "子女", "子供", "扶养", "扶養", "扶养中", "扶養中", "家族", "親族", "児童"))
+
+
+def _business_field_count(evidence_bundles: list[EvidenceBundle]) -> int:
+    terms = ("FUYOU", "FUY", "扶養", "KAZOKU", "FAMILY", "CHILD", "KODOMO", "JIDO", "児童", "子", "家族", "親族", "人数")
+    count = 0
+    seen = set()
+    for bundle in evidence_bundles:
+        for field in bundle.recommended_fields:
+            label = f"{field.get('table')}.{field.get('column')}.{field.get('comment') or ''}".upper()
+            if label in seen:
+                continue
+            seen.add(label)
+            if any(term.upper() in label for term in terms):
+                count += 1
+    return count
+
+
+def _only_employee_number_fields(fields: list[dict]) -> bool:
+    if not fields:
+        return True
+    labels = [str(field.get("column") or "").upper() for field in fields]
+    return all(label in {"CSHAINNO", "SHAINNO", "EMPLOYEE_NO", "CEMPLOYEE_NO"} or "SHAIN" in label for label in labels)
 
 
 async def _legacy_metadata_evidence(session, vector: PGVectorRepository, product_id: str, requirement: str, query_ja: str) -> list[dict]:

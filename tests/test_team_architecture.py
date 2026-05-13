@@ -6,7 +6,7 @@ from anysql.storage.repositories import decrypt_secret, encrypt_secret, stable_h
 
 
 def test_version_is_bumped_to_team_architecture_release():
-    assert __version__ == "0.5.0"
+    assert __version__ == "0.6.0"
 
 
 def test_secret_round_trip_preserves_product_password():

@@ -111,12 +111,14 @@ from anysql.api.analysis import router as analysis_router
 from anysql.api.agent_runs import router as agent_runs_router
 from anysql.api.assistant import router as assistant_router
 from anysql.api.generation import router as generation_router
+from anysql.api.knowledge_gaps import router as knowledge_gaps_router
 from anysql.api.products import router as products_router
 from anysql.api.search import router as search_router
 app.include_router(analysis_router)
 app.include_router(agent_runs_router)
 app.include_router(assistant_router)
 app.include_router(generation_router)
+app.include_router(knowledge_gaps_router)
 app.include_router(products_router)
 app.include_router(search_router)
 

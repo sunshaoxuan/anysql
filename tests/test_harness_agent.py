@@ -1,4 +1,6 @@
-from anysql.harness.agentic_service import build_evidence_bundles, build_intent_plan
+from anysql.core.harness_models import EvidenceBundle
+from anysql.harness.agentic_service import HarnessAgentService, build_evidence_bundles, build_intent_plan
+from anysql.models.schemas import SQLAnalysis, SQLRecord, SQLStatement
 from anysql.storage.rag_repository import _rrf_fuse
 
 
@@ -131,3 +133,65 @@ def test_part_time_hire_date_restricts_to_djnd3001():
     assert bundle.recommended_tables[0]["table"] == "DJND3001"
     assert all(row["table"] != "DKIDO" for row in bundle.recommended_tables)
     assert bundle.recommended_fields[0]["column"] == "NINYO_DTE"
+
+
+def test_unknown_intent_blocks_dangerous_tables_from_context():
+    plan = build_intent_plan("查询所有员工中有多子女在扶养中的员工")
+    evidence = [
+        {
+            "facet": "table_profile",
+            "source_id": "WK_BAD",
+            "table": "WK_BAD",
+            "score": 0.9,
+            "meta": {"table": "WK_BAD", "domain": "employee", "role": "work"},
+        },
+        {
+            "facet": "table_profile",
+            "source_id": "EMP_FAMILY",
+            "table": "EMP_FAMILY",
+            "score": 0.7,
+            "meta": {"table": "EMP_FAMILY", "domain": "employee", "role": "master"},
+        },
+    ]
+    bundle = build_evidence_bundles(plan, evidence)[0]
+    assert all(row["table"] != "WK_BAD" for row in bundle.recommended_tables)
+    assert any(row["table"] == "WK_BAD" for row in bundle.blocked_candidates)
+
+
+def test_unknown_intent_only_employee_number_is_invalid():
+    service = HarnessAgentService.__new__(HarnessAgentService)
+    plan = build_intent_plan("查询所有员工中有多子女在扶养中的员工")
+    record = SQLRecord(
+        statement=SQLStatement(id="draft", product="p", source_file="draft.sql", raw_sql="SELECT CSHAINNO FROM EMP_MASTER;", tables=["EMP_MASTER"]),
+        analysis=SQLAnalysis(summary="x"),
+    )
+    bundle = EvidenceBundle(
+        intent="unknown",
+        recommended_tables=[{"table": "EMP_MASTER", "role": "master", "domain": "employee"}],
+        recommended_fields=[{"table": "EMP_MASTER", "column": "CSHAINNO"}],
+    )
+    result = service.validate_record(record, plan, [bundle])
+    assert not result.valid
+    assert any("Dependent-child/support evidence" in error for error in result.errors)
+
+
+def test_count_function_is_not_unknown_column():
+    service = HarnessAgentService.__new__(HarnessAgentService)
+    plan = build_intent_plan("查所有异动记录")
+    record = SQLRecord(
+        statement=SQLStatement(
+            id="draft",
+            product="p",
+            source_file="draft.sql",
+            raw_sql="SELECT CSHAINNO, COUNT(*) FROM DKIDO_R GROUP BY CSHAINNO;",
+            tables=["DKIDO_R"],
+        ),
+        analysis=SQLAnalysis(summary="x"),
+    )
+    bundle = EvidenceBundle(
+        intent="transfer_records",
+        recommended_tables=[{"table": "DKIDO_R", "role": "history_fact", "domain": "transfer"}],
+        recommended_fields=[{"table": "DKIDO_R", "column": "CSHAINNO"}],
+    )
+    result = service.validate_record(record, plan, [bundle])
+    assert not any("COUNT" in error for error in result.errors)

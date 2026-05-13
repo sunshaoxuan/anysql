@@ -334,3 +334,44 @@ class FeedbackEvent(Base, TimestampMixin):
     weight: Mapped[float] = mapped_column(Float, default=1.0)
     payload: Mapped[dict] = mapped_column(JSON, default=dict)
     created_by: Mapped[str] = mapped_column(String(128), default="system")
+
+
+class KnowledgeGap(Base, TimestampMixin):
+    __tablename__ = "knowledge_gaps"
+    __table_args__ = (UniqueConstraint("product_id", "requirement_hash", name="uq_knowledge_gap_product_requirement"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=new_id)
+    product_id: Mapped[str] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"), nullable=False, index=True)
+    agent_run_id: Mapped[str | None] = mapped_column(ForeignKey("agent_runs.id", ondelete="SET NULL"), index=True)
+    session_id: Mapped[str | None] = mapped_column(String(128), index=True)
+    requirement: Mapped[str] = mapped_column(Text, nullable=False)
+    requirement_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), default="queued", index=True)
+    invalid_reason: Mapped[str] = mapped_column(Text, default="")
+    trigger_reasons: Mapped[list] = mapped_column(JSON, default=list)
+    validation_result: Mapped[dict] = mapped_column(JSON, default=dict)
+    evidence_snapshot: Mapped[list] = mapped_column(JSON, default=list)
+    retrieval_snapshot: Mapped[list] = mapped_column(JSON, default=list)
+    candidate_summary: Mapped[dict] = mapped_column(JSON, default=dict)
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    reviewed_by: Mapped[str] = mapped_column(String(128), default="system")
+
+
+class KnowledgeCandidate(Base, TimestampMixin):
+    __tablename__ = "knowledge_candidates"
+    __table_args__ = (
+        UniqueConstraint("gap_id", "candidate_type", "content_hash", name="uq_knowledge_candidate_gap_type_hash"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=new_id)
+    gap_id: Mapped[str] = mapped_column(ForeignKey("knowledge_gaps.id", ondelete="CASCADE"), nullable=False, index=True)
+    product_id: Mapped[str] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"), nullable=False, index=True)
+    candidate_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), default="proposed", index=True)
+    source: Mapped[str] = mapped_column(String(64), default="auto_gap_analysis", index=True)
+    title: Mapped[str] = mapped_column(String(255), default="")
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    content_hash: Mapped[str] = mapped_column(String(64), default="", index=True)
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    reason: Mapped[str] = mapped_column(Text, default="")
+    reviewed_by: Mapped[str] = mapped_column(String(128), default="system")

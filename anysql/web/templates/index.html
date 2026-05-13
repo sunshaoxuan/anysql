@@ -314,6 +314,8 @@ function renderEvidenceSummary(intentPlan, bundles, validation, response) {
         fields.length ? { label: 'Fields', value: fields.join(', ') } : null,
         response.llm_call_count ? { label: 'LLM', value: response.llm_call_count } : null,
         response.client_elapsed_ms ? { label: '思考時間', value: formatDuration(response.client_elapsed_ms) } : null,
+        response.source ? { label: 'Source', value: response.source } : null,
+        response.knowledge_gap_id ? { label: 'Gap', value: response.knowledge_gap_id } : null,
         response.agent_run_id ? { label: 'Run', value: response.agent_run_id } : null
     ].filter(Boolean);
     if (!parts.length) return '';

@@ -54,6 +54,8 @@ async def assist_sql(req: SQLAssistantRequest):
             )
             if result.harness.invalid_reason:
                 text = f"已生成草稿，但未通过校验：{result.harness.invalid_reason}"
+            if result.harness.knowledge_gap_id:
+                text = "本轮不可用，已创建知识补强任务，等待审核后可重跑。"
             return SQLAssistantResponse(
                 product=req.product,
                 session_id=req.session_id,
@@ -71,6 +73,8 @@ async def assist_sql(req: SQLAssistantRequest):
                 repair_count=result.harness.repair_count,
                 llm_call_count=result.harness.llm_call_count,
                 invalid_reason=result.harness.invalid_reason,
+                source=result.harness.source,
+                knowledge_gap_id=result.harness.knowledge_gap_id,
             )
         except Exception as exc:
             # Fall through to the legacy path as a safety net while the harness layer is evolving.

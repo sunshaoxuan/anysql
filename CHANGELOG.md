@@ -2,6 +2,27 @@
 
 All notable changes to AnySQL are documented in this file.
 
+## [0.6.0] - 2026-05-13
+
+### Added
+
+- Added the Knowledge Gap workflow for invalid/unsafe assistant runs, including PostgreSQL persistence for `knowledge_gaps` and `knowledge_candidates`.
+- Added background `knowledge_gap_analysis` RQ task to mine business terms, explore Metadata evidence, and propose reviewable intent/table/field/predicate candidates.
+- Added Knowledge Gap review APIs for listing, viewing, approving, rejecting, and rerunning gap analysis.
+- Added Product UI controls for reviewing knowledge gaps and approving or rejecting proposed self-improvement candidates.
+
+### Changed
+
+- Assistant responses now return `source=needs_knowledge_review` and `knowledge_gap_id` when a draft is invalid and requires self-improvement review.
+- Unknown intents now require safe business evidence before being treated as verified; dangerous table roles are blocked from unknown-intent context.
+- Approved gap candidates are indexed into RAG as medium-weight evidence, while unapproved candidates stay out of retrieval.
+- Alembic startup now commits extension setup before migrations so version advancement is reliable.
+
+### Fixed
+
+- SQL validator now treats aggregate/common SQL functions such as `COUNT`, `SUM`, `AVG`, `MIN`, `MAX`, `NVL`, and `DECODE` as functions instead of unknown columns.
+- Dependent-child/family-support requests with only employee-number evidence are invalidated instead of being shown as usable SQL.
+
 ## [0.5.0] - 2026-05-13
 
 ### Added

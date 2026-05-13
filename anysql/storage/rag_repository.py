@@ -18,6 +18,8 @@ from anysql.storage.models import (
     AgentStep,
     FeedbackEvent,
     JoinEdge,
+    KnowledgeCandidate,
+    KnowledgeGap,
     MetadataColumn,
     MetadataTable,
     MetadataTableProfile,
@@ -39,7 +41,9 @@ METADATA_NODE_TYPES = {
 }
 
 
-def stable_content_hash(content: str) -> str:
+def stable_content_hash(content: object) -> str:
+    if not isinstance(content, str):
+        content = json.dumps(content, ensure_ascii=False, sort_keys=True)
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
@@ -338,6 +342,34 @@ class RagRepository:
         row.source_version = (row.source_version or 0) + 1
         return created
 
+    def upsert_candidate_node(self, product_id: str, candidate: KnowledgeCandidate) -> int:
+        payload = candidate.payload or {}
+        candidate_type = candidate.candidate_type
+        source_id = f"{candidate.id}:{candidate_type}"
+        if candidate_type == "business_term":
+            term = str(payload.get("term") or candidate.title)
+            synonyms = payload.get("synonyms") or []
+            content = f"Approved business term {term}: {', '.join(map(str, synonyms))}. Source gap: {candidate.gap_id}"
+            meta = {"term": term, "synonyms": synonyms, "gap_id": candidate.gap_id, "candidate_id": candidate.id}
+            return self._upsert_node(product_id, "knowledge_candidate", source_id, "business_term", content, meta, weight=1.55)
+        if candidate_type == "intent":
+            intent = str(payload.get("intent") or candidate.title)
+            content = f"Approved intent candidate {intent}. Description: {payload.get('description') or ''}. Terms: {payload.get('terms') or []}"
+            meta = {**payload, "gap_id": candidate.gap_id, "candidate_id": candidate.id}
+            return self._upsert_node(product_id, "knowledge_candidate", source_id, "intent_candidate", content, meta, weight=1.6)
+        if candidate_type == "table_field_evidence":
+            table = str(payload.get("table") or "")
+            fields = payload.get("fields") or []
+            content = f"Approved table field evidence for {table}. Fields: {', '.join(map(str, fields))}. Reason: {candidate.reason}"
+            meta = {**payload, "gap_id": candidate.gap_id, "candidate_id": candidate.id}
+            return self._upsert_node(product_id, "knowledge_candidate", source_id, "table_field_evidence", content, meta, weight=1.65)
+        if candidate_type == "predicate_pattern":
+            content = f"Approved predicate pattern: {payload.get('pattern') or candidate.title}. Reason: {candidate.reason}"
+            meta = {**payload, "gap_id": candidate.gap_id, "candidate_id": candidate.id}
+            return self._upsert_node(product_id, "knowledge_candidate", source_id, "predicate_pattern", content, meta, weight=1.5)
+        content = f"Approved candidate {candidate_type}: {json.dumps(payload, ensure_ascii=False)}"
+        return self._upsert_node(product_id, "knowledge_candidate", source_id, candidate_type, content, {"payload": payload, "gap_id": candidate.gap_id}, weight=1.2)
+
 
 class AgentRunRepository:
     def __init__(self, session: Session):
@@ -413,6 +445,172 @@ class AgentRunRepository:
                 for step in steps
             ],
         }
+
+
+class KnowledgeGapRepository:
+    def __init__(self, session: Session):
+        self.session = session
+
+    def create_or_update(
+        self,
+        product_id: str,
+        requirement: str,
+        agent_run_id: str | None,
+        session_id: str | None,
+        invalid_reason: str,
+        trigger_reasons: list[str],
+        validation_result: dict,
+        evidence_bundles: list,
+        retrieval_scores: list,
+    ) -> tuple[KnowledgeGap, bool]:
+        requirement_hash = stable_content_hash(_normalize_requirement(requirement))
+        gap = self.session.scalar(select(KnowledgeGap).where(
+            KnowledgeGap.product_id == product_id,
+            KnowledgeGap.requirement_hash == requirement_hash,
+        ))
+        created = False
+        if not gap:
+            gap = KnowledgeGap(product_id=product_id, requirement=requirement, requirement_hash=requirement_hash)
+            self.session.add(gap)
+            created = True
+        gap.agent_run_id = agent_run_id
+        gap.session_id = session_id
+        gap.invalid_reason = invalid_reason
+        gap.trigger_reasons = trigger_reasons
+        gap.validation_result = validation_result
+        gap.evidence_snapshot = evidence_bundles
+        gap.retrieval_snapshot = retrieval_scores
+        if gap.status not in {"running", "proposed", "approved", "rejected"}:
+            gap.status = "queued"
+        self.session.flush()
+        return gap, created
+
+    def get(self, gap_id: str) -> KnowledgeGap | None:
+        return self.session.get(KnowledgeGap, gap_id)
+
+    def list(self, product_id: str | None = None, status: str | None = None, limit: int = 100) -> list[dict]:
+        query = select(KnowledgeGap).order_by(KnowledgeGap.updated_at.desc()).limit(limit)
+        if product_id:
+            query = query.where(KnowledgeGap.product_id == product_id)
+        if status:
+            query = query.where(KnowledgeGap.status == status)
+        return [self.to_dict(row, include_candidates=False) for row in self.session.scalars(query)]
+
+    def mark_running(self, gap_id: str) -> None:
+        gap = self._require(gap_id)
+        gap.status = "running"
+        self.session.flush()
+
+    def mark_failed(self, gap_id: str, error: str) -> None:
+        gap = self._require(gap_id)
+        gap.status = "failed"
+        gap.candidate_summary = {"error": error}
+        self.session.flush()
+
+    def upsert_candidate(
+        self,
+        gap: KnowledgeGap,
+        candidate_type: str,
+        title: str,
+        payload: dict,
+        confidence: float,
+        reason: str,
+    ) -> KnowledgeCandidate:
+        content_hash = stable_content_hash({"type": candidate_type, "title": title, "payload": payload})
+        row = self.session.scalar(select(KnowledgeCandidate).where(
+            KnowledgeCandidate.gap_id == gap.id,
+            KnowledgeCandidate.candidate_type == candidate_type,
+            KnowledgeCandidate.content_hash == content_hash,
+        ))
+        if not row:
+            row = KnowledgeCandidate(gap_id=gap.id, product_id=gap.product_id, candidate_type=candidate_type, content_hash=content_hash)
+            self.session.add(row)
+        row.title = title
+        row.payload = payload
+        row.confidence = confidence
+        row.reason = reason
+        row.status = "proposed" if row.status not in {"approved", "rejected"} else row.status
+        self.session.flush()
+        return row
+
+    def mark_proposed(self, gap_id: str, summary: dict, confidence: float) -> KnowledgeGap:
+        gap = self._require(gap_id)
+        gap.status = "proposed"
+        gap.candidate_summary = summary
+        gap.confidence = confidence
+        self.session.flush()
+        return gap
+
+    def approve(self, gap_id: str, reviewed_by: str = "system") -> KnowledgeGap:
+        gap = self._require(gap_id)
+        gap.status = "approved"
+        gap.reviewed_by = reviewed_by
+        for candidate in self.session.scalars(select(KnowledgeCandidate).where(KnowledgeCandidate.gap_id == gap_id)):
+            if candidate.status == "proposed":
+                candidate.status = "approved"
+                candidate.reviewed_by = reviewed_by
+        self.session.flush()
+        return gap
+
+    def reject(self, gap_id: str, reviewed_by: str = "system") -> KnowledgeGap:
+        gap = self._require(gap_id)
+        gap.status = "rejected"
+        gap.reviewed_by = reviewed_by
+        for candidate in self.session.scalars(select(KnowledgeCandidate).where(KnowledgeCandidate.gap_id == gap_id)):
+            if candidate.status == "proposed":
+                candidate.status = "rejected"
+                candidate.reviewed_by = reviewed_by
+        self.session.flush()
+        return gap
+
+    def candidates(self, gap_id: str, status: str | None = None) -> list[KnowledgeCandidate]:
+        query = select(KnowledgeCandidate).where(KnowledgeCandidate.gap_id == gap_id).order_by(KnowledgeCandidate.confidence.desc())
+        if status:
+            query = query.where(KnowledgeCandidate.status == status)
+        return list(self.session.scalars(query))
+
+    def to_dict(self, gap: KnowledgeGap, include_candidates: bool = True) -> dict:
+        result = {
+            "id": gap.id,
+            "product_id": gap.product_id,
+            "agent_run_id": gap.agent_run_id,
+            "session_id": gap.session_id,
+            "requirement": gap.requirement,
+            "status": gap.status,
+            "invalid_reason": gap.invalid_reason,
+            "trigger_reasons": gap.trigger_reasons,
+            "validation_result": gap.validation_result,
+            "candidate_summary": gap.candidate_summary,
+            "confidence": gap.confidence,
+            "created_at": gap.created_at.isoformat() if gap.created_at else None,
+            "updated_at": gap.updated_at.isoformat() if gap.updated_at else None,
+        }
+        if include_candidates:
+            result["candidates"] = [self.candidate_to_dict(row) for row in self.candidates(gap.id)]
+        return result
+
+    @staticmethod
+    def candidate_to_dict(candidate: KnowledgeCandidate) -> dict:
+        return {
+            "id": candidate.id,
+            "gap_id": candidate.gap_id,
+            "product_id": candidate.product_id,
+            "candidate_type": candidate.candidate_type,
+            "status": candidate.status,
+            "source": candidate.source,
+            "title": candidate.title,
+            "payload": candidate.payload,
+            "confidence": candidate.confidence,
+            "reason": candidate.reason,
+            "created_at": candidate.created_at.isoformat() if candidate.created_at else None,
+            "updated_at": candidate.updated_at.isoformat() if candidate.updated_at else None,
+        }
+
+    def _require(self, gap_id: str) -> KnowledgeGap:
+        gap = self.session.get(KnowledgeGap, gap_id)
+        if not gap:
+            raise ValueError(f"Knowledge gap not found: {gap_id}")
+        return gap
 
 
 def _table_content(table: MetadataTable, profile: MetadataTableProfile | None) -> str:
@@ -558,3 +756,7 @@ def _tokenize(query: str) -> list[str]:
             if key in token:
                 expanded.extend(values)
     return expanded
+
+
+def _normalize_requirement(requirement: str) -> str:
+    return re.sub(r"\s+", "", (requirement or "").strip().lower())

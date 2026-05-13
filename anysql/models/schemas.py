@@ -204,6 +204,8 @@ class SQLAssistantResponse(BaseModel):
     repair_count: int = 0
     llm_call_count: int = 0
     invalid_reason: str = ""
+    source: str = ""
+    knowledge_gap_id: Optional[str] = None
 
 
 class SQLLearnRequest(BaseModel):

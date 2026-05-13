@@ -73,6 +73,23 @@
                 <div id="ragStats" class="profile-list"></div>
                 <div id="joinEdges" class="profile-list"></div>
             </div>
+
+            <div class="profile-panel">
+                <div class="side-label">知識補強</div>
+                <div class="profile-actions">
+                    <select id="gapStatus">
+                        <option value="">all</option>
+                        <option value="queued">queued</option>
+                        <option value="running">running</option>
+                        <option value="proposed">proposed</option>
+                        <option value="approved">approved</option>
+                        <option value="rejected">rejected</option>
+                        <option value="failed">failed</option>
+                    </select>
+                    <button type="button" class="btn btn-outline icon-btn" onclick="loadKnowledgeGaps()" title="Knowledge gaps"><i class="fas fa-wand-magic-sparkles"></i></button>
+                </div>
+                <div id="knowledgeGaps" class="profile-list"></div>
+            </div>
         </section>
     </div>
 </div>
@@ -139,6 +156,7 @@ function editProduct(physicalId) {
         database_password: p.database_password || ''
     });
     loadTableProfiles();
+    loadKnowledgeGaps();
 }
 
 function togglePassword(btn) {
@@ -340,12 +358,70 @@ async function loadJoinEdges() {
     el.innerHTML = rows.map(edge => `<div class="profile-row"><div><strong>${escapeHtml(edge.from_table)}.${escapeHtml(edge.from_column)} -> ${escapeHtml(edge.to_table)}.${escapeHtml(edge.to_column)}</strong><small>${escapeHtml(edge.source)} / ${Math.round((edge.confidence || 0) * 100)}% / ${escapeHtml(edge.reason || '')}</small></div></div>`).join('');
 }
 
+async function loadKnowledgeGaps() {
+    const code = document.getElementById('productForm').elements.code.value;
+    if (!code) return;
+    const status = document.getElementById('gapStatus').value || '';
+    const res = await fetch(`/api/knowledge-gaps?product=${encodeURIComponent(code)}&status=${encodeURIComponent(status)}&limit=40`);
+    const el = document.getElementById('knowledgeGaps');
+    if (!res.ok) {
+        el.innerHTML = '';
+        return;
+    }
+    const rows = await res.json();
+    if (!rows.length) {
+        el.innerHTML = '<div class="profile-row"><div><small>候補なし</small></div></div>';
+        return;
+    }
+    el.innerHTML = rows.map(gap => `
+        <div class="profile-row">
+            <div>
+                <strong>${escapeHtml(gap.status)} / ${Math.round((gap.confidence || 0) * 100)}%</strong>
+                <small>${escapeHtml(gap.requirement || '')}</small>
+                <small>${escapeHtml((gap.trigger_reasons || []).join(' / ') || gap.invalid_reason || '')}</small>
+                <small>${escapeHtml(JSON.stringify(gap.candidate_summary || {}))}</small>
+            </div>
+            <button type="button" class="btn btn-outline icon-btn" onclick="approveGap('${gap.id}')" title="Approve"><i class="fas fa-check"></i></button>
+            <button type="button" class="btn btn-outline icon-btn danger-btn" onclick="rejectGap('${gap.id}')" title="Reject"><i class="fas fa-xmark"></i></button>
+            <button type="button" class="btn btn-outline icon-btn" onclick="rerunGap('${gap.id}')" title="Rerun"><i class="fas fa-rotate"></i></button>
+        </div>
+    `).join('');
+}
+
+async function approveGap(id) {
+    const res = await fetch(`/api/knowledge-gaps/${encodeURIComponent(id)}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reviewed_by: 'system' })
+    });
+    if (!res.ok) alert(await res.text());
+    await loadKnowledgeGaps();
+    await loadRagStats();
+}
+
+async function rejectGap(id) {
+    const res = await fetch(`/api/knowledge-gaps/${encodeURIComponent(id)}/reject`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reviewed_by: 'system' })
+    });
+    if (!res.ok) alert(await res.text());
+    await loadKnowledgeGaps();
+}
+
+async function rerunGap(id) {
+    const res = await fetch(`/api/knowledge-gaps/${encodeURIComponent(id)}/rerun`, { method: 'POST' });
+    if (!res.ok) alert(await res.text());
+    await loadKnowledgeGaps();
+}
+
 document.getElementById('profileSearch').addEventListener('keydown', event => {
     if (event.key === 'Enter') {
         event.preventDefault();
         loadTableProfiles();
     }
 });
+document.getElementById('gapStatus').addEventListener('change', loadKnowledgeGaps);
 
 loadProducts();
 </script>
