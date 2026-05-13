@@ -353,6 +353,10 @@ class KnowledgeGap(Base, TimestampMixin):
     evidence_snapshot: Mapped[list] = mapped_column(JSON, default=list)
     retrieval_snapshot: Mapped[list] = mapped_column(JSON, default=list)
     candidate_summary: Mapped[dict] = mapped_column(JSON, default=dict)
+    progress_stage: Mapped[str] = mapped_column(String(64), default="queued")
+    progress_percent: Mapped[float] = mapped_column(Float, default=0.0)
+    progress_message: Mapped[str] = mapped_column(Text, default="")
+    progress_detail: Mapped[dict] = mapped_column(JSON, default=dict)
     confidence: Mapped[float] = mapped_column(Float, default=0.0)
     reviewed_by: Mapped[str] = mapped_column(String(128), default="system")
 

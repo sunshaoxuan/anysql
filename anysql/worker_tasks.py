@@ -192,7 +192,25 @@ async def _knowledge_gap_analysis(gap_id: str) -> dict:
             gap = repo.get(gap_id)
             if not gap:
                 raise ValueError(f"Knowledge gap not found: {gap_id}")
+            repo.update_progress(
+                gap_id,
+                "term_mining",
+                15,
+                "Extracting business terms from the failed request.",
+                {"requirement": gap.requirement, "triggers": gap.trigger_reasons},
+                status="running",
+            )
+            session.commit()
             terms = _mine_gap_terms(gap.requirement, gap.validation_result, gap.evidence_snapshot)
+            repo.update_progress(
+                gap_id,
+                "term_candidates",
+                30,
+                "Expanded business terms into metadata language.",
+                {"terms": [{"term": term, "synonyms": synonyms, "domain": domain} for term, synonyms, domain in terms]},
+                status="running",
+            )
+            session.commit()
             for term, synonyms, domain in terms:
                 repo.upsert_candidate(
                     gap,
@@ -202,7 +220,28 @@ async def _knowledge_gap_analysis(gap_id: str) -> dict:
                     0.72,
                     "extracted from failed requirement and expanded to metadata language",
                 )
+            repo.update_progress(
+                gap_id,
+                "evidence_search",
+                45,
+                "Searching metadata for table and field evidence.",
+                {"term_count": len(terms)},
+                status="running",
+            )
+            session.commit()
             field_candidates = _explore_gap_fields(session, gap.product_id, terms)
+            repo.update_progress(
+                gap_id,
+                "evidence_scoring",
+                65,
+                "Scoring candidate tables and fields.",
+                {
+                    "candidate_tables": [item["table"] for item in field_candidates[:10]],
+                    "candidate_count": len(field_candidates),
+                },
+                status="running",
+            )
+            session.commit()
             for item in field_candidates:
                 repo.upsert_candidate(
                     gap,
@@ -212,6 +251,15 @@ async def _knowledge_gap_analysis(gap_id: str) -> dict:
                     float(item.get("confidence") or 0.0),
                     item.get("reason") or "metadata field evidence",
                 )
+            repo.update_progress(
+                gap_id,
+                "candidate_building",
+                80,
+                "Building review candidates for intent and predicate patterns.",
+                {"field_candidate_count": len(field_candidates)},
+                status="running",
+            )
+            session.commit()
             if terms:
                 intent_name = _propose_intent_name(gap.requirement, terms)
                 repo.upsert_candidate(
@@ -240,6 +288,15 @@ async def _knowledge_gap_analysis(gap_id: str) -> dict:
                         min(0.7, float(item.get("confidence") or 0.0)),
                         "candidate predicate pattern from gap analysis",
                     )
+            repo.update_progress(
+                gap_id,
+                "review_packaging",
+                92,
+                "Packaging proposed knowledge for human review.",
+                {"candidate_count": len(field_candidates) + len(terms)},
+                status="running",
+            )
+            session.commit()
             confidence = max([float(item.get("confidence") or 0.0) for item in field_candidates] + ([0.5] if terms else [0.0]))
             summary = {
                 "terms": [term for term, _, _ in terms],

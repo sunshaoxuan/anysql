@@ -482,6 +482,10 @@ class KnowledgeGapRepository:
         gap.retrieval_snapshot = retrieval_scores
         if gap.status not in {"running", "proposed", "approved", "rejected"}:
             gap.status = "queued"
+            gap.progress_stage = "queued"
+            gap.progress_percent = 0.0
+            gap.progress_message = "Knowledge gap analysis is queued."
+            gap.progress_detail = {"trigger_reasons": trigger_reasons}
         self.session.flush()
         return gap, created
 
@@ -499,12 +503,38 @@ class KnowledgeGapRepository:
     def mark_running(self, gap_id: str) -> None:
         gap = self._require(gap_id)
         gap.status = "running"
+        gap.progress_stage = "starting"
+        gap.progress_percent = max(float(gap.progress_percent or 0.0), 5.0)
+        gap.progress_message = "Starting knowledge gap analysis."
         self.session.flush()
+
+    def update_progress(
+        self,
+        gap_id: str,
+        stage: str,
+        percent: float,
+        message: str,
+        detail: dict | None = None,
+        status: str | None = None,
+    ) -> KnowledgeGap:
+        gap = self._require(gap_id)
+        if status:
+            gap.status = status
+        gap.progress_stage = stage
+        gap.progress_percent = max(0.0, min(100.0, float(percent)))
+        gap.progress_message = message
+        if detail is not None:
+            gap.progress_detail = detail
+        self.session.flush()
+        return gap
 
     def mark_failed(self, gap_id: str, error: str) -> None:
         gap = self._require(gap_id)
         gap.status = "failed"
         gap.candidate_summary = {"error": error}
+        gap.progress_stage = "failed"
+        gap.progress_percent = 100.0
+        gap.progress_message = error
         self.session.flush()
 
     def upsert_candidate(
@@ -538,6 +568,10 @@ class KnowledgeGapRepository:
         gap.status = "proposed"
         gap.candidate_summary = summary
         gap.confidence = confidence
+        gap.progress_stage = "review_ready"
+        gap.progress_percent = 100.0
+        gap.progress_message = "Candidate knowledge is ready for review."
+        gap.progress_detail = summary
         self.session.flush()
         return gap
 
@@ -545,6 +579,9 @@ class KnowledgeGapRepository:
         gap = self._require(gap_id)
         gap.status = "approved"
         gap.reviewed_by = reviewed_by
+        gap.progress_stage = "approved"
+        gap.progress_percent = 100.0
+        gap.progress_message = "Approved candidate knowledge has been promoted to RAG."
         for candidate in self.session.scalars(select(KnowledgeCandidate).where(KnowledgeCandidate.gap_id == gap_id)):
             if candidate.status == "proposed":
                 candidate.status = "approved"
@@ -556,6 +593,9 @@ class KnowledgeGapRepository:
         gap = self._require(gap_id)
         gap.status = "rejected"
         gap.reviewed_by = reviewed_by
+        gap.progress_stage = "rejected"
+        gap.progress_percent = 100.0
+        gap.progress_message = "Candidate knowledge was rejected."
         for candidate in self.session.scalars(select(KnowledgeCandidate).where(KnowledgeCandidate.gap_id == gap_id)):
             if candidate.status == "proposed":
                 candidate.status = "rejected"
@@ -581,6 +621,12 @@ class KnowledgeGapRepository:
             "trigger_reasons": gap.trigger_reasons,
             "validation_result": gap.validation_result,
             "candidate_summary": gap.candidate_summary,
+            "progress": {
+                "stage": gap.progress_stage or gap.status,
+                "percent": float(gap.progress_percent or 0.0),
+                "message": gap.progress_message or "",
+                "detail": gap.progress_detail or {},
+            },
             "confidence": gap.confidence,
             "created_at": gap.created_at.isoformat() if gap.created_at else None,
             "updated_at": gap.updated_at.isoformat() if gap.updated_at else None,

@@ -100,6 +100,7 @@
 let products = [];
 let editingPhysicalId = null;
 let tableProfiles = [];
+let knowledgeGapPoller = null;
 
 function fillForm(product = {}) {
     const form = document.getElementById('productForm');
@@ -129,6 +130,8 @@ function fillForm(product = {}) {
 
 function newProduct() {
     fillForm();
+    stopKnowledgeGapPolling();
+    document.getElementById('knowledgeGaps').innerHTML = '';
     document.querySelector('[name="code"]').focus();
 }
 
@@ -157,6 +160,13 @@ function editProduct(physicalId) {
     });
     loadTableProfiles();
     loadKnowledgeGaps();
+}
+
+function stopKnowledgeGapPolling() {
+    if (knowledgeGapPoller) {
+        clearInterval(knowledgeGapPoller);
+        knowledgeGapPoller = null;
+    }
 }
 
 function togglePassword(btn) {
@@ -371,21 +381,54 @@ async function loadKnowledgeGaps() {
     const rows = await res.json();
     if (!rows.length) {
         el.innerHTML = '<div class="profile-row"><div><small>候補なし</small></div></div>';
+        stopKnowledgeGapPolling();
         return;
     }
+    const hasActive = rows.some(gap => ['queued', 'running'].includes(gap.status));
+    if (hasActive && !knowledgeGapPoller) {
+        knowledgeGapPoller = setInterval(loadKnowledgeGaps, 2000);
+    } else if (!hasActive) {
+        stopKnowledgeGapPolling();
+    }
     el.innerHTML = rows.map(gap => `
-        <div class="profile-row">
-            <div>
+        <div class="profile-row gap-row">
+            <div class="gap-info">
                 <strong>${escapeHtml(gap.status)} / ${Math.round((gap.confidence || 0) * 100)}%</strong>
                 <small>${escapeHtml(gap.requirement || '')}</small>
                 <small>${escapeHtml((gap.trigger_reasons || []).join(' / ') || gap.invalid_reason || '')}</small>
-                <small>${escapeHtml(JSON.stringify(gap.candidate_summary || {}))}</small>
+                ${renderGapProgress(gap)}
             </div>
-            <button type="button" class="btn btn-outline icon-btn" onclick="approveGap('${gap.id}')" title="Approve"><i class="fas fa-check"></i></button>
-            <button type="button" class="btn btn-outline icon-btn danger-btn" onclick="rejectGap('${gap.id}')" title="Reject"><i class="fas fa-xmark"></i></button>
-            <button type="button" class="btn btn-outline icon-btn" onclick="rerunGap('${gap.id}')" title="Rerun"><i class="fas fa-rotate"></i></button>
+            <div class="gap-actions">
+                <button type="button" class="btn btn-outline icon-btn" onclick="approveGap('${gap.id}')" title="Approve" ${gap.status === 'proposed' ? '' : 'disabled'}><i class="fas fa-check"></i></button>
+                <button type="button" class="btn btn-outline icon-btn danger-btn" onclick="rejectGap('${gap.id}')" title="Reject" ${['proposed','failed'].includes(gap.status) ? '' : 'disabled'}><i class="fas fa-xmark"></i></button>
+                <button type="button" class="btn btn-outline icon-btn" onclick="rerunGap('${gap.id}')" title="Rerun"><i class="fas fa-rotate"></i></button>
+            </div>
         </div>
     `).join('');
+}
+
+function renderGapProgress(gap) {
+    const progress = gap.progress || {};
+    const percent = Math.max(0, Math.min(100, Number(progress.percent || 0)));
+    const detail = progress.detail || {};
+    const tables = Array.isArray(detail.candidate_tables) && detail.candidate_tables.length
+        ? `<small>候補表: ${escapeHtml(detail.candidate_tables.slice(0, 8).join(', '))}</small>`
+        : '';
+    const terms = Array.isArray(detail.terms)
+        ? `<small>用語: ${escapeHtml(detail.terms.map(item => item.term || item).slice(0, 6).join(', '))}</small>`
+        : '';
+    return `
+        <div class="gap-progress compact">
+            <div class="gap-progress-head">
+                <span>${escapeHtml(progress.stage || gap.status)}</span>
+                <strong>${Math.round(percent)}%</strong>
+            </div>
+            <div class="gap-progress-bar"><i style="width:${percent}%"></i></div>
+            <small>${escapeHtml(progress.message || JSON.stringify(gap.candidate_summary || {}))}</small>
+            ${tables}
+            ${terms}
+        </div>
+    `;
 }
 
 async function approveGap(id) {

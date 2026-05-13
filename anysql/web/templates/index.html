@@ -76,6 +76,7 @@ let currentResponse = null;
 let lastRequirement = "";
 let thinkingTimerId = null;
 let thinkingStartedAt = null;
+const gapPollers = new Map();
 const sessionId = crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
 
 const SQL_KEYWORDS = new Set([
@@ -290,10 +291,67 @@ function renderRecord(response) {
         <h3>${escapeHtml(analysis.summary || 'SQL')}</h3>
         <p>${escapeHtml((analysis.business_context || []).join(' / '))}</p>
         ${renderEvidenceSummary(intentPlan, bundles, validation, response)}
+        ${response.knowledge_gap_id ? renderKnowledgeGapProgress(response.knowledge_gap_id) : ''}
         ${invalidReason ? `<p class="side-muted">${escapeHtml(invalidReason)}</p>` : ''}
         ${warnings.length ? `<p class="side-muted">${escapeHtml(warnings.join(' / '))}</p>` : ''}
         ${canAccept ? `<button class="btn btn-primary icon-btn" onclick="acceptCurrentSql(this)" title="${escapeHtml(t('accept'))}"><i class="fas fa-thumbs-up"></i></button>` : ''}
     `);
+    if (response.knowledge_gap_id) startKnowledgeGapPolling(response.knowledge_gap_id);
+}
+
+function renderKnowledgeGapProgress(gapId) {
+    return `
+        <div id="gap-progress-${escapeHtml(gapId)}" class="gap-progress" data-gap-id="${escapeHtml(gapId)}">
+            <div class="gap-progress-head">
+                <span>IMPROVING</span>
+                <strong>0%</strong>
+            </div>
+            <div class="gap-progress-bar"><i style="width:0%"></i></div>
+            <small>后台补强任务已创建，等待 worker 处理。</small>
+        </div>
+    `;
+}
+
+function updateKnowledgeGapProgress(gap) {
+    const el = document.getElementById(`gap-progress-${gap.id}`);
+    if (!el) return;
+    const progress = gap.progress || {};
+    const percent = Math.max(0, Math.min(100, Number(progress.percent || 0)));
+    const label = gap.status === 'proposed' ? 'NEEDS REVIEW' : (gap.status === 'running' ? 'IMPROVING' : gap.status.toUpperCase());
+    const detail = progress.detail || {};
+    const tables = Array.isArray(detail.candidate_tables) && detail.candidate_tables.length
+        ? `候補表: ${detail.candidate_tables.slice(0, 6).join(', ')}`
+        : '';
+    el.innerHTML = `
+        <div class="gap-progress-head">
+            <span>${escapeHtml(label)}</span>
+            <strong>${Math.round(percent)}%</strong>
+        </div>
+        <div class="gap-progress-bar"><i style="width:${percent}%"></i></div>
+        <small>${escapeHtml(progress.stage || gap.status)} / ${escapeHtml(progress.message || '')}</small>
+        ${tables ? `<small>${escapeHtml(tables)}</small>` : ''}
+    `;
+}
+
+function startKnowledgeGapPolling(gapId) {
+    if (gapPollers.has(gapId)) clearInterval(gapPollers.get(gapId));
+    const poll = async () => {
+        try {
+            const res = await fetch(`/api/knowledge-gaps/${encodeURIComponent(gapId)}`);
+            if (!res.ok) return;
+            const gap = await res.json();
+            updateKnowledgeGapProgress(gap);
+            if (!['queued', 'running'].includes(gap.status)) {
+                clearInterval(gapPollers.get(gapId));
+                gapPollers.delete(gapId);
+            }
+        } catch (error) {
+            clearInterval(gapPollers.get(gapId));
+            gapPollers.delete(gapId);
+        }
+    };
+    poll();
+    gapPollers.set(gapId, setInterval(poll, 2000));
 }
 
 function renderEvidenceSummary(intentPlan, bundles, validation, response) {

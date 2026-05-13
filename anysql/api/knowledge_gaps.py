@@ -94,6 +94,14 @@ async def rerun_knowledge_gap(gap_id: str):
         if not gap:
             raise HTTPException(status_code=404, detail=f"knowledge gap not found: {gap_id}")
         gap.status = "queued"
+        repo.update_progress(
+            gap_id,
+            "queued",
+            0.0,
+            "Knowledge gap analysis is queued for rerun.",
+            {"rerun": True},
+            status="queued",
+        )
         session.flush()
     if storage.queue:
         storage.queue.enqueue("anysql.worker_tasks.knowledge_gap_analysis", gap_id)

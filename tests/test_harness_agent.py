@@ -1,7 +1,8 @@
 from anysql.core.harness_models import EvidenceBundle
 from anysql.harness.agentic_service import HarnessAgentService, build_evidence_bundles, build_intent_plan
 from anysql.models.schemas import SQLAnalysis, SQLRecord, SQLStatement
-from anysql.storage.rag_repository import _rrf_fuse
+from anysql.storage.models import KnowledgeGap
+from anysql.storage.rag_repository import KnowledgeGapRepository, _rrf_fuse
 
 
 def test_intent_plan_preserves_name_and_all_record_conditions():
@@ -195,3 +196,23 @@ def test_count_function_is_not_unknown_column():
     )
     result = service.validate_record(record, plan, [bundle])
     assert not any("COUNT" in error for error in result.errors)
+
+
+def test_knowledge_gap_dict_exposes_progress():
+    repo = KnowledgeGapRepository.__new__(KnowledgeGapRepository)
+    repo.candidates = lambda gap_id: []
+    gap = KnowledgeGap(
+        id="gap-1",
+        product_id="product-1",
+        requirement="列出所有员工中有多子女在扶养中的员工",
+        requirement_hash="hash",
+        status="running",
+        progress_stage="evidence_search",
+        progress_percent=45.0,
+        progress_message="Searching metadata for table and field evidence.",
+        progress_detail={"term_count": 3},
+    )
+    data = repo.to_dict(gap)
+    assert data["progress"]["stage"] == "evidence_search"
+    assert data["progress"]["percent"] == 45.0
+    assert data["progress"]["detail"]["term_count"] == 3

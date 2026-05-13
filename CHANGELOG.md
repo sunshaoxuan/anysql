@@ -2,6 +2,14 @@
 
 All notable changes to AnySQL are documented in this file.
 
+## [0.6.1] - 2026-05-13
+
+### Added
+
+- Added observable Knowledge Gap progress fields so background self-improvement tasks expose their current stage, percentage, message, and detail payload.
+- Added live Assistant-side polling for `knowledge_gap_id` so invalid runs show the ongoing backend improvement status in the chat result.
+- Added auto-refreshing Product UI progress bars for queued/running Knowledge Gap analysis, including candidate table and term previews.
+
 ## [0.6.0] - 2026-05-13
 
 ### Added
