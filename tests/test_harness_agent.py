@@ -3,7 +3,7 @@ from anysql.harness.agentic_service import HarnessAgentService, build_evidence_b
 from anysql.models.schemas import SQLAnalysis, SQLRecord, SQLStatement
 from anysql.storage.models import KnowledgeGap
 from anysql.storage.rag_repository import KnowledgeGapRepository, _rrf_fuse
-from anysql.worker_tasks import _gap_field_strength, _gap_table_penalty
+from anysql.worker_tasks import _build_review_pack, _gap_field_strength, _gap_table_penalty
 
 
 def test_intent_plan_preserves_name_and_all_record_conditions():
@@ -227,3 +227,46 @@ def test_gap_field_strength_ignores_generic_employee_key():
 def test_gap_table_penalty_downranks_input_xml_payroll_tables():
     assert _gap_table_penalty("[年調ｿﾌﾄOP]扶養控除申告書ﾃﾞｰﾀ XML") > 0
     assert _gap_table_penalty("扶養親族情報") == 0
+
+
+def test_review_pack_prefers_family_history_over_payroll_or_xml():
+    pack = _build_review_pack(
+        "查询所有姓松下的有多子女抚养的员工",
+        [("多子女", ["子供人数"], "employee"), ("扶养中", ["扶養親族"], "employee")],
+        [
+            {
+                "table": "URKAZOKU",
+                "comment": "[履歴]家族情報",
+                "domain": "employee",
+                "role": "history_fact",
+                "fields": ["CKZNAME", "NFUYO"],
+                "field_comments": {"CKZNAME": "家族氏名", "NFUYO": "扶養区分"},
+                "confidence": 0.82,
+                "reason": "strong dependent/support field markers",
+            },
+            {
+                "table": "UMFUYO",
+                "comment": "[ﾏｽﾀ]扶養手当",
+                "domain": "payroll",
+                "role": "unknown",
+                "fields": ["NFUYOKO"],
+                "field_comments": {"NFUYOKO": "扶養子"},
+                "confidence": 0.86,
+                "reason": "strong dependent/support field markers",
+            },
+            {
+                "table": "NCEXNTAAPP001_03",
+                "comment": "扶養控除等申告書ﾃﾞｰﾀ",
+                "domain": "employee",
+                "role": "unknown",
+                "fields": ["XML001_E00040"],
+                "field_comments": {"XML001_E00040": "児童"},
+                "confidence": 0.9,
+                "reason": "strong dependent/support field markers",
+            },
+        ],
+    )
+    assert pack["proposed_intent"] == "employee_dependent_children"
+    assert pack["primary_table"]["table"] == "URKAZOKU"
+    assert any(row["table"] == "UMFUYO" for row in pack["blocked_tables"])
+    assert any(row["table"] == "NCEXNTAAPP001_03" for row in pack["blocked_tables"])

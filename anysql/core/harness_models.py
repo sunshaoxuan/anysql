@@ -75,3 +75,4 @@ class HarnessResult(BaseModel):
     invalid_reason: str = ""
     source: str = ""
     knowledge_gap_id: str | None = None
+    review_pack: dict = Field(default_factory=dict)

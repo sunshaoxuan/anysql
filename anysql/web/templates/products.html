@@ -393,15 +393,15 @@ async function loadKnowledgeGaps() {
     el.innerHTML = rows.map(gap => `
         <div class="profile-row gap-row">
             <div class="gap-info">
-                <strong>${escapeHtml(gap.status)} / ${Math.round((gap.confidence || 0) * 100)}%</strong>
+                <strong>${escapeHtml(gap.status === 'approved' ? 'READY TO RERUN' : gap.status)} / ${Math.round((gap.confidence || 0) * 100)}%</strong>
                 <small>${escapeHtml(gap.requirement || '')}</small>
                 <small>${escapeHtml((gap.trigger_reasons || []).join(' / ') || gap.invalid_reason || '')}</small>
                 ${renderGapProgress(gap)}
             </div>
             <div class="gap-actions">
-                <button type="button" class="btn btn-outline icon-btn" onclick="approveGap('${gap.id}')" title="Approve" ${gap.status === 'proposed' ? '' : 'disabled'}><i class="fas fa-check"></i></button>
+                <button type="button" class="btn btn-outline icon-btn" onclick="approveGap('${gap.id}')" title="Approve Review Pack" ${gap.status === 'proposed' ? '' : 'disabled'}><i class="fas fa-check"></i></button>
                 <button type="button" class="btn btn-outline icon-btn danger-btn" onclick="rejectGap('${gap.id}')" title="Reject" ${['proposed','failed'].includes(gap.status) ? '' : 'disabled'}><i class="fas fa-xmark"></i></button>
-                <button type="button" class="btn btn-outline icon-btn" onclick="rerunGap('${gap.id}')" title="Rerun"><i class="fas fa-rotate"></i></button>
+                <button type="button" class="btn btn-outline icon-btn" onclick="rerunGap('${gap.id}')" title="Rerun Analysis"><i class="fas fa-rotate"></i></button>
             </div>
         </div>
     `).join('');
@@ -409,24 +409,32 @@ async function loadKnowledgeGaps() {
 
 function renderGapProgress(gap) {
     const progress = gap.progress || {};
+    const reviewPack = gap.review_pack || {};
     const percent = Math.max(0, Math.min(100, Number(progress.percent || 0)));
-    const detail = progress.detail || {};
-    const tables = Array.isArray(detail.candidate_tables) && detail.candidate_tables.length
-        ? `<small>候補表: ${escapeHtml(detail.candidate_tables.slice(0, 8).join(', '))}</small>`
+    const primary = reviewPack.primary_table && reviewPack.primary_table.table
+        ? `<small>Primary: ${escapeHtml(reviewPack.primary_table.table)} / ${escapeHtml(reviewPack.primary_table.comment || '')}</small>`
         : '';
-    const terms = Array.isArray(detail.terms)
-        ? `<small>用語: ${escapeHtml(detail.terms.map(item => item.term || item).slice(0, 6).join(', '))}</small>`
+    const alternatives = Array.isArray(reviewPack.alternative_tables) && reviewPack.alternative_tables.length
+        ? `<small>Alternatives: ${escapeHtml(reviewPack.alternative_tables.slice(0, 5).map(row => row.table).join(', '))}</small>`
+        : '';
+    const blocked = Array.isArray(reviewPack.blocked_tables) && reviewPack.blocked_tables.length
+        ? `<small>Blocked: ${reviewPack.blocked_tables.length}</small>`
+        : '';
+    const missing = Array.isArray(reviewPack.missing_evidence) && reviewPack.missing_evidence.length
+        ? `<small>Missing: ${escapeHtml(reviewPack.missing_evidence.join(', '))}</small>`
         : '';
     return `
         <div class="gap-progress compact">
             <div class="gap-progress-head">
-                <span>${escapeHtml(progress.stage || gap.status)}</span>
+                <span>${escapeHtml(reviewPack.proposed_intent || progress.stage || gap.status)}</span>
                 <strong>${Math.round(percent)}%</strong>
             </div>
             <div class="gap-progress-bar"><i style="width:${percent}%"></i></div>
             <small>${escapeHtml(progress.message || JSON.stringify(gap.candidate_summary || {}))}</small>
-            ${tables}
-            ${terms}
+            ${primary}
+            ${alternatives}
+            ${blocked}
+            ${missing}
         </div>
     `;
 }

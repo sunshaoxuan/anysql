@@ -75,6 +75,7 @@ async def assist_sql(req: SQLAssistantRequest):
                 invalid_reason=result.harness.invalid_reason,
                 source=result.harness.source,
                 knowledge_gap_id=result.harness.knowledge_gap_id,
+                review_pack=result.harness.review_pack,
             )
         except Exception as exc:
             # Fall through to the legacy path as a safety net while the harness layer is evolving.

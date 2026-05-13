@@ -94,6 +94,7 @@ async def rerun_knowledge_gap(gap_id: str):
         if not gap:
             raise HTTPException(status_code=404, detail=f"knowledge gap not found: {gap_id}")
         gap.status = "queued"
+        gap.candidate_summary = {}
         repo.update_progress(
             gap_id,
             "queued",

@@ -206,6 +206,7 @@ class SQLAssistantResponse(BaseModel):
     invalid_reason: str = ""
     source: str = ""
     knowledge_gap_id: Optional[str] = None
+    review_pack: dict = Field(default_factory=dict)
 
 
 class SQLLearnRequest(BaseModel):

@@ -2,6 +2,18 @@
 
 All notable changes to AnySQL are documented in this file.
 
+## [0.6.3] - 2026-05-14
+
+### Added
+
+- Added Knowledge Review Pack output for knowledge gaps, including proposed intent, primary table, alternatives, blocked tables, recommended fields, predicate hints, aggregation hints, and missing evidence.
+- Added dependent-children intent policy and review-pack evidence boosts so approved gap knowledge can guide future assistant runs.
+
+### Changed
+
+- Knowledge gap review now shows decision-oriented summaries instead of flat candidate lists.
+- Rerunning a knowledge gap clears stale review packs before rebuilding candidates.
+
 ## [0.6.2] - 2026-05-14
 
 ### Changed

@@ -266,7 +266,7 @@ function renderRecord(response) {
 
     const meta = document.getElementById('currentSqlMeta');
     meta.dataset.empty = 'false';
-    meta.innerText = `${response.mode.toUpperCase()} / ${stmt.id || ''}`;
+    meta.innerText = response.mode === 'invalid' ? '未生成可用 SQL' : `${response.mode.toUpperCase()} / ${stmt.id || ''}`;
     const detail = document.getElementById('detailLink');
     if (response.learned || response.mode === 'matched') {
         detail.href = `/sql/${encodeURIComponent(stmt.id)}`;
@@ -280,7 +280,7 @@ function renderRecord(response) {
     if (response.mode === 'invalid') {
         const sqlEl = document.getElementById('currentSql');
         sqlEl.className = 'sql-code empty invalid-sql';
-        sqlEl.textContent = 'SQL blocked: validation failed. Review the knowledge gap before rerunning.';
+        sqlEl.textContent = '未生成可用 SQL。请先审核知识补强决策包后重跑。';
     } else {
         renderSql();
     }
@@ -329,11 +329,13 @@ function updateKnowledgeGapProgress(gap) {
     const el = document.getElementById(`gap-progress-${gap.id}`);
     if (!el) return;
     const progress = gap.progress || {};
+    const reviewPack = gap.review_pack || {};
     const percent = Math.max(0, Math.min(100, Number(progress.percent || 0)));
     const label = gap.status === 'proposed' ? 'NEEDS REVIEW' : (gap.status === 'running' ? 'IMPROVING' : gap.status.toUpperCase());
-    const detail = progress.detail || {};
-    const tables = Array.isArray(detail.candidate_tables) && detail.candidate_tables.length
-        ? `候補表: ${detail.candidate_tables.slice(0, 6).join(', ')}`
+    const primary = reviewPack.primary_table && reviewPack.primary_table.table ? `Primary: ${reviewPack.primary_table.table}` : '';
+    const intent = reviewPack.proposed_intent ? `Intent: ${reviewPack.proposed_intent}` : '';
+    const tables = Array.isArray(reviewPack.alternative_tables) && reviewPack.alternative_tables.length
+        ? `Alternatives: ${reviewPack.alternative_tables.slice(0, 4).map(row => row.table).join(', ')}`
         : '';
     el.innerHTML = `
         <div class="gap-progress-head">
@@ -342,6 +344,8 @@ function updateKnowledgeGapProgress(gap) {
         </div>
         <div class="gap-progress-bar"><i style="width:${percent}%"></i></div>
         <small>${escapeHtml(progress.stage || gap.status)} / ${escapeHtml(progress.message || '')}</small>
+        ${intent ? `<small>${escapeHtml(intent)}</small>` : ''}
+        ${primary ? `<small>${escapeHtml(primary)}</small>` : ''}
         ${tables ? `<small>${escapeHtml(tables)}</small>` : ''}
     `;
 }
@@ -371,6 +375,7 @@ function renderEvidenceSummary(intentPlan, bundles, validation, response) {
     const intents = (intentPlan.units || []).map(unit => unit.name).filter(Boolean).join(' / ');
     const tableNames = [];
     const compact = response && response.source === 'needs_knowledge_review';
+    const reviewPack = (response && response.review_pack) || {};
     (bundles || []).forEach(bundle => (bundle.recommended_tables || []).slice(0, compact ? 1 : 3).forEach(item => {
         if (item.table && !tableNames.includes(item.table)) tableNames.push(item.table);
     }));
@@ -381,7 +386,9 @@ function renderEvidenceSummary(intentPlan, bundles, validation, response) {
     }));
     const parts = [
         { label: 'Status', value: validation && validation.valid === false ? 'INVALID' : 'VERIFIED' },
-        intents ? { label: 'Intent', value: intents } : null,
+        compact && reviewPack.proposed_intent ? { label: 'Proposed Intent', value: reviewPack.proposed_intent } : null,
+        compact && reviewPack.primary_table ? { label: 'Primary Table', value: reviewPack.primary_table.table || '' } : null,
+        !compact && intents ? { label: 'Intent', value: intents } : null,
         tableNames.length && !compact ? { label: 'Tables', value: tableNames.join(', ') } : null,
         fields.length && !compact ? { label: 'Fields', value: fields.join(', ') } : null,
         response.llm_call_count ? { label: 'LLM', value: response.llm_call_count } : null,

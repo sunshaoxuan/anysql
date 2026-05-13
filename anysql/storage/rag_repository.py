@@ -354,7 +354,11 @@ class RagRepository:
             return self._upsert_node(product_id, "knowledge_candidate", source_id, "business_term", content, meta, weight=1.55)
         if candidate_type == "intent":
             intent = str(payload.get("intent") or candidate.title)
-            content = f"Approved intent candidate {intent}. Description: {payload.get('description') or ''}. Terms: {payload.get('terms') or []}"
+            review_pack = payload.get("review_pack") or {}
+            content = (
+                f"Approved intent candidate {intent}. Description: {payload.get('description') or ''}. "
+                f"Terms: {payload.get('terms') or []}. Review pack: {json.dumps(review_pack, ensure_ascii=False)}"
+            )
             meta = {**payload, "gap_id": candidate.gap_id, "candidate_id": candidate.id}
             return self._upsert_node(product_id, "knowledge_candidate", source_id, "intent_candidate", content, meta, weight=1.6)
         if candidate_type == "table_field_evidence":
@@ -592,8 +596,13 @@ class KnowledgeGapRepository:
         gap.progress_stage = "approved"
         gap.progress_percent = 100.0
         gap.progress_message = "Approved candidate knowledge has been promoted to RAG."
+        review_pack = (gap.candidate_summary or {}).get("review_pack") or {}
         for candidate in self.session.scalars(select(KnowledgeCandidate).where(KnowledgeCandidate.gap_id == gap_id)):
             if candidate.status == "proposed":
+                if review_pack:
+                    payload = dict(candidate.payload or {})
+                    payload["review_pack"] = review_pack
+                    candidate.payload = payload
                 candidate.status = "approved"
                 candidate.reviewed_by = reviewed_by
         self.session.flush()
@@ -631,6 +640,7 @@ class KnowledgeGapRepository:
             "trigger_reasons": gap.trigger_reasons,
             "validation_result": gap.validation_result,
             "candidate_summary": gap.candidate_summary,
+            "review_pack": (gap.candidate_summary or {}).get("review_pack") or {},
             "progress": {
                 "stage": gap.progress_stage or gap.status,
                 "percent": float(gap.progress_percent or 0.0),

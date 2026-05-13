@@ -102,3 +102,11 @@ def test_transfer_check_log_policy_prefers_xcidochklog():
     assert policy is not None
     assert policy.allowed_roles == ("log",)
     assert policy.preferred_tables == ("XCIDOCHKLOG",)
+
+
+def test_dependent_children_intent_is_resolved():
+    assert resolve_intent("查询所有姓松下的有多子女抚养的员工") == "employee_dependent_children"
+    policy = policy_for_intent("employee_dependent_children")
+    assert policy is not None
+    assert "URKAZOKU" in policy.preferred_tables
+    assert "work" in policy.blocked_roles

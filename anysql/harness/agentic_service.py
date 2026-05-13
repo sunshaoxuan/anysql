@@ -140,6 +140,7 @@ class HarnessAgentService:
                         validation = self.validate_record(record, intent_plan, evidence_bundles)
             gap_id = None
             source = ""
+            review_pack = {}
             invalid_reason = "; ".join(validation.errors[:3]) if not validation.valid else ""
             record.metadata_snapshot = {
                 **(record.metadata_snapshot or {}),
@@ -163,8 +164,10 @@ class HarnessAgentService:
                     )
                     gap_id = gap.id
                     source = "needs_knowledge_review"
+                    review_pack = (gap.candidate_summary or {}).get("review_pack") or {}
                     record.metadata_snapshot["knowledge_gap_id"] = gap_id
                     record.metadata_snapshot["source"] = source
+                    record.metadata_snapshot["review_pack"] = review_pack
                     if self.storage.queue and (created or gap.status == "queued"):
                         self.storage.queue.enqueue("anysql.worker_tasks.knowledge_gap_analysis", gap_id)
             harness = self._complete_run(
@@ -181,6 +184,7 @@ class HarnessAgentService:
                 invalid_reason=invalid_reason,
                 source=source,
                 knowledge_gap_id=gap_id,
+                review_pack=review_pack,
             )
             return HarnessAssistResult("invalid" if invalid_reason else ("revised" if current_sql else "generated"), record, matches, False, harness)
         except Exception:
@@ -382,6 +386,7 @@ class HarnessAgentService:
         invalid_reason: str = "",
         source: str = "",
         knowledge_gap_id: str | None = None,
+        review_pack: dict | None = None,
     ) -> HarnessResult:
         with self.storage.database.session() as session:
             AgentRunRepository(session).complete(
@@ -408,6 +413,7 @@ class HarnessAgentService:
             invalid_reason=invalid_reason,
             source=source,
             knowledge_gap_id=knowledge_gap_id,
+            review_pack=review_pack or {},
         )
 
 
@@ -514,6 +520,50 @@ def build_evidence_bundles(intent_plan: IntentPlan, evidence: list[dict]) -> lis
                     item["score"] = float(item.get("score") or 0) + 30
                 if column in {"NINYO_DTE", "DNINYO_DTE", "CNAMEKNJ", "CNAMEKNA", "CSHAINNO"}:
                     item["score"] = float(item.get("score") or 0) + 10
+        if unit.name == "employee_dependent_children":
+            review_pack_items = [item for item in filtered if item.get("facet") == "intent_candidate" and ((item.get("meta") or {}).get("review_pack") or {})]
+            review_pack = ((review_pack_items[0].get("meta") or {}).get("review_pack") or {}) if review_pack_items else {}
+            primary_table = str(((review_pack.get("primary_table") or {}).get("table") or "")).upper()
+            alternative_tables = {
+                str(row.get("table") or "").upper()
+                for row in (review_pack.get("alternative_tables") or [])
+                if row.get("table")
+            }
+            blocked_tables = {
+                str(row.get("table") or "").upper()
+                for row in (review_pack.get("blocked_tables") or [])
+                if row.get("table")
+            }
+            if primary_table:
+                for field in review_pack.get("recommended_fields") or []:
+                    table = str(field.get("table") or primary_table).upper()
+                    column = str(field.get("column") or "").upper()
+                    if not column:
+                        continue
+                    filtered.append({
+                        "source_id": f"review_pack:{table}.{column}",
+                        "facet": "column_semantic",
+                        "table": table,
+                        "column": column,
+                        "score": 24.0,
+                        "reasons": ["approved_review_pack"],
+                        "evidence": f"Approved review pack recommends {table}.{column}.",
+                        "meta": {"table": table, "column": column, "domain": "employee", "role": "history_fact"},
+                    })
+            if primary_table or alternative_tables or blocked_tables:
+                filtered = [
+                    item for item in filtered
+                    if str(item.get("table") or (item.get("meta") or {}).get("table") or "").upper() not in blocked_tables
+                ]
+            for item in filtered:
+                table = str(item.get("table") or (item.get("meta") or {}).get("table") or "").upper()
+                column = str(item.get("column") or (item.get("meta") or {}).get("column") or "").upper()
+                if primary_table and table == primary_table:
+                    item["score"] = float(item.get("score") or 0) + 30
+                elif table in alternative_tables:
+                    item["score"] = float(item.get("score") or 0) + 12
+                if any(marker in column for marker in ("FUYO", "KAZOKU", "ZOKU", "CHILD", "JIDO")):
+                    item["score"] = float(item.get("score") or 0) + 8
         tables = _top_tables(filtered, limit=4)
         fields = _top_fields(filtered, tables, limit=40)
         bundle = EvidenceBundle(

@@ -57,6 +57,13 @@ POLICIES: dict[str, IntentPolicy] = {
         blocked_roles=("work", "if_staging", "backup"),
         preferred_tables=("XCIDOCHKLOG",),
     ),
+    "employee_dependent_children": IntentPolicy(
+        intent="employee_dependent_children",
+        domain="employee",
+        allowed_roles=("master", "history_fact", "business_fact", "unknown"),
+        blocked_roles=("log", "work", "if_staging", "backup"),
+        preferred_tables=("URKAZOKU", "UMFUYO", "URMYNO_GEN_FUYO", "URMYNO_ZEN_FUYO"),
+    ),
 }
 
 
@@ -69,6 +76,7 @@ def resolve_intent(requirement: str) -> str:
     name = any(word in text for word in ("姓", "姓名", "名字", "氏名"))
     part_time = any(word in text for word in ("非常勤", "非職", "非职", "パート"))
     hire_date = any(word in text for word in ("入职", "入社", "入职日", "入社日", "入职日期", "入社年月日", "任用", "任用年月日", "採用", "採用年月日"))
+    dependent_children = any(word in text for word in ("多子女", "子女", "子供", "児童", "扶養", "扶养", "家族", "親族", "抚养"))
     if part_time and hire_date:
         return "part_time_employee_hire_date"
     if transfer and check_log:
@@ -77,6 +85,8 @@ def resolve_intent(requirement: str) -> str:
         return "transfer_records"
     if basic and employee and name:
         return "employee_basic_name"
+    if employee and dependent_children:
+        return "employee_dependent_children"
     return "unknown"
 
 

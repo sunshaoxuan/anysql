@@ -231,6 +231,7 @@ async def _knowledge_gap_analysis(gap_id: str) -> dict:
             )
             session.commit()
             field_candidates = _explore_gap_fields(session, gap.product_id, terms)
+            review_pack = _build_review_pack(gap.requirement, terms, field_candidates)
             repo.update_progress(
                 gap_id,
                 "evidence_scoring",
@@ -239,6 +240,7 @@ async def _knowledge_gap_analysis(gap_id: str) -> dict:
                 {
                     "candidate_tables": [item["table"] for item in field_candidates[:10]],
                     "candidate_count": len(field_candidates),
+                    "review_pack": review_pack,
                 },
                 status="running",
             )
@@ -271,6 +273,7 @@ async def _knowledge_gap_analysis(gap_id: str) -> dict:
                         "intent": intent_name,
                         "description": "Auto-proposed intent from knowledge gap; requires review before use.",
                         "terms": [term for term, _, _ in terms],
+                        "review_pack": review_pack,
                     },
                     0.62 if field_candidates else 0.38,
                     "derived from gap terms and candidate metadata evidence",
@@ -284,6 +287,7 @@ async def _knowledge_gap_analysis(gap_id: str) -> dict:
                         {
                             "table": item["table"],
                             "fields": item["fields"],
+                            "review_pack": review_pack,
                             "pattern": "use reviewed dependent/support fields; aggregate only when rows represent child/dependent details",
                         },
                         min(0.7, float(item.get("confidence") or 0.0)),
@@ -304,6 +308,7 @@ async def _knowledge_gap_analysis(gap_id: str) -> dict:
                 "candidate_tables": [item["table"] for item in field_candidates[:10]],
                 "candidate_count": len(field_candidates) + len(terms),
                 "needs_review": True,
+                "review_pack": review_pack,
             }
             repo.mark_proposed(gap_id, summary, confidence)
             return summary
@@ -337,15 +342,21 @@ def _mine_gap_terms(requirement: str, validation_result: dict, evidence_snapshot
 def _explore_gap_fields(session, product_id: str, terms: list[tuple[str, list[str], str]]) -> list[dict]:
     if not terms:
         return []
-    keywords = set()
+    ordered_keywords: list[str] = []
     for term, synonyms, _ in terms:
-        keywords.add(term)
-        keywords.update(synonyms)
-    keywords.update({"FUYOU", "FUYO", "FUY", "KAZOKU", "FAMILY", "CHILD", "KODOMO", "JIDO", "ZOKUGARA"})
+        ordered_keywords.append(term)
+        ordered_keywords.extend(synonyms)
+    ordered_keywords.extend(["家族", "親族", "扶養", "続柄", "子供", "児童", "FUYOU", "FUYO", "FUY", "KAZOKU", "FAMILY", "CHILD", "KODOMO", "JIDO", "ZOKUGARA"])
     weak_keywords = {"対象", "明細", "COUNT"}
-    keywords = {keyword for keyword in keywords if keyword not in weak_keywords}
+    keywords = []
+    seen_keywords = set()
+    for keyword in ordered_keywords:
+        if keyword in weak_keywords or keyword in seen_keywords:
+            continue
+        seen_keywords.add(keyword)
+        keywords.append(keyword)
     filters = []
-    for keyword in list(keywords)[:24]:
+    for keyword in keywords[:48]:
         like = f"%{keyword}%"
         filters.extend([
             MetadataTable.table_name.ilike(like),
@@ -359,7 +370,7 @@ def _explore_gap_fields(session, product_id: str, terms: list[tuple[str, list[st
         .outerjoin(MetadataTableProfile, (MetadataTableProfile.product_id == MetadataTable.product_id) & (MetadataTableProfile.table_name == MetadataTable.table_name))
         .where(MetadataTable.product_id == product_id)
         .where(or_(*filters))
-        .limit(800)
+        .limit(5000)
     ).all())
     by_table: dict[str, dict] = {}
     dangerous = {"log", "work", "if_staging", "backup"}
@@ -430,6 +441,125 @@ def _propose_intent_name(requirement: str, terms: list[tuple[str, list[str], str
     return "auto_proposed_intent"
 
 
+def _build_review_pack(requirement: str, terms: list[tuple[str, list[str], str]], candidates: list[dict]) -> dict:
+    proposed_intent = _propose_intent_name(requirement, terms) if terms else "auto_proposed_intent"
+    scored = []
+    blocked = []
+    for item in candidates:
+        row = dict(item)
+        table_text = f"{row.get('table') or ''} {row.get('comment') or ''}".upper()
+        blocked_reason = _review_block_reason(table_text, row)
+        business_score = _review_business_score(table_text, row)
+        row["business_score"] = round(business_score, 4)
+        if blocked_reason:
+            row["blocked_reason"] = blocked_reason
+            blocked.append(row)
+        else:
+            scored.append(row)
+    scored.sort(key=lambda row: (-float(row.get("business_score") or 0.0), -float(row.get("confidence") or 0.0), str(row.get("table") or "")))
+    blocked.sort(key=lambda row: (-float(row.get("confidence") or 0.0), str(row.get("table") or "")))
+    primary = scored[0] if scored and float(scored[0].get("business_score") or 0.0) >= 0.52 else None
+    alternatives = scored[1:6] if primary else scored[:6]
+    recommended_fields = []
+    source_tables = ([primary] if primary else []) + alternatives[:3]
+    for item in source_tables:
+        for field in (item.get("fields") or [])[:10]:
+            label = {"table": item.get("table"), "column": field, "comment": (item.get("field_comments") or {}).get(field, "")}
+            if label not in recommended_fields:
+                recommended_fields.append(label)
+    missing = []
+    if not primary:
+        missing.append("primary_table")
+    if len(recommended_fields) < 2:
+        missing.append("dependent_child_business_fields")
+    if proposed_intent == "auto_proposed_intent":
+        missing.append("intent")
+    return {
+        "proposed_intent": proposed_intent,
+        "intent_confidence": 0.76 if proposed_intent == "employee_dependent_children" and primary else 0.45,
+        "primary_table": _pack_table(primary) if primary else None,
+        "alternative_tables": [_pack_table(row) for row in alternatives],
+        "blocked_tables": [_pack_table(row, blocked=True) for row in blocked[:12]],
+        "recommended_fields": recommended_fields[:24],
+        "predicate_hints": _predicate_hints(proposed_intent, primary),
+        "aggregation_hints": _aggregation_hints(proposed_intent, primary),
+        "missing_evidence": missing,
+        "needs_manual_input": bool(missing),
+        "review_recommendation": _review_recommendation(primary, missing),
+    }
+
+
+def _review_business_score(table_text: str, item: dict) -> float:
+    score = float(item.get("confidence") or 0.0)
+    role = str(item.get("role") or "")
+    domain = str(item.get("domain") or "")
+    if domain == "employee":
+        score += 0.12
+    if role in {"history_fact", "master", "business_fact"}:
+        score += 0.1
+    if any(marker in table_text for marker in ("家族情報", "扶養家族", "扶養親族", "家族", "親族")):
+        score += 0.22
+    if any(marker in table_text for marker in ("履歴", "歴")):
+        score += 0.08
+    if any(marker in table_text for marker in ("給与", "手当", "期末勤勉", "年末調整", "年調", "保険", "控除", "申告書", "XML", "APP", "KARI_", "入力", "取込")):
+        score -= 0.32
+    return max(0.0, min(1.0, score))
+
+
+def _review_block_reason(table_text: str, item: dict) -> str:
+    role = str(item.get("role") or "")
+    domain = str(item.get("domain") or "")
+    if role in {"log", "work", "if_staging", "backup"}:
+        return f"role={role}"
+    if domain == "payroll":
+        return "payroll_source_requires_explicit_review"
+    table_name = str(item.get("table") or "").upper()
+    if table_name.startswith(("WK", "VWK")) or "_WK" in table_name:
+        return "work_like_candidate"
+    if any(marker in table_text for marker in ("給与", "手当", "期末勤勉", "年末調整", "年調", "保険", "控除", "申告書", "XML", "APP", "KARI_", "入力", "取込", "退職手当")):
+        return "low_priority_or_non_primary_business_source"
+    return ""
+
+
+def _pack_table(item: dict | None, blocked: bool = False) -> dict | None:
+    if not item:
+        return None
+    result = {
+        "table": item.get("table"),
+        "comment": item.get("comment") or "",
+        "domain": item.get("domain") or "unknown",
+        "role": item.get("role") or "unknown",
+        "confidence": item.get("confidence") or 0.0,
+        "business_score": item.get("business_score", item.get("confidence") or 0.0),
+        "reason": item.get("reason") or "",
+        "fields": (item.get("fields") or [])[:12],
+    }
+    if blocked:
+        result["blocked_reason"] = item.get("blocked_reason") or ""
+    return result
+
+
+def _predicate_hints(intent: str, primary: dict | None) -> list[str]:
+    if intent == "employee_dependent_children":
+        hints = ["optional surname filter should use a name field only when the user provides a surname"]
+        if primary:
+            hints.append(f"use fields from {primary.get('table')} only after review approval")
+        return hints
+    return []
+
+
+def _aggregation_hints(intent: str, primary: dict | None) -> list[str]:
+    if intent == "employee_dependent_children":
+        return ["group by employee number/name when counting children or dependents", "count only rows/fields that evidence child or dependent relationship"]
+    return []
+
+
+def _review_recommendation(primary: dict | None, missing: list[str]) -> str:
+    if missing:
+        return "Needs manual review: choose a primary table/fields before this knowledge can guide SQL generation."
+    return f"Approve if {primary.get('table')} is the official family/dependent evidence source for this product."
+
+
 def _gap_field_strength(table_text: str, column_text: str, column_name: str, hits: list[str]) -> int:
     """Score whether a metadata field is real dependent/support evidence, not just an employee key."""
     if column_name in {"CCOMPKB", "CQTAIKEIKB", "NGAITONEN", "CSHAINNO", "CMNCLIENT", "CMNCOMP", "CMNUSER", "DMNDATE", "NSEQ"}:
@@ -449,7 +579,7 @@ def _gap_field_strength(table_text: str, column_text: str, column_name: str, hit
 
 def _gap_table_penalty(table_text: str) -> float:
     penalty = 0.0
-    if any(marker in table_text for marker in ("採用者給与", "給与", "退職手当", "XML", "申告書ﾃﾞｰﾀ", "申告書データ", "APP", "取込", "入力")):
+    if any(marker in table_text for marker in ("採用者給与", "給与", "手当", "期末勤勉", "年調", "保険", "控除", "退職手当", "XML", "申告書ﾃﾞｰﾀ", "申告書データ", "APP", "取込", "入力")):
         penalty += 0.18
     if any(marker in table_text for marker in ("KARI_", "仮", "一時", "WK", "WORK")):
         penalty += 0.12
