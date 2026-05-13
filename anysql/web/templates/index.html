@@ -57,7 +57,10 @@
             </div>
 
             <div class="match-panel">
-                <div class="side-label" data-i18n="match">マッチ判定</div>
+                <div class="match-head">
+                    <div class="side-label" data-i18n="match">マッチ判定</div>
+                    <div id="thinkingTimer" class="thinking-timer" hidden>00:00</div>
+                </div>
                 <div id="matchList" class="match-list"></div>
             </div>
         </section>
@@ -71,6 +74,8 @@ let currentSqlId = null;
 let currentSql = null;
 let currentResponse = null;
 let lastRequirement = "";
+let thinkingTimerId = null;
+let thinkingStartedAt = null;
 const sessionId = crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
 
 const SQL_KEYWORDS = new Set([
@@ -174,6 +179,42 @@ function addMessage(role, html) {
     `;
     log.appendChild(row);
     log.scrollTop = log.scrollHeight;
+    return row;
+}
+
+function formatDuration(ms) {
+    const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+    const minutes = String(Math.floor(totalSeconds / 60)).padStart(2, '0');
+    const seconds = String(totalSeconds % 60).padStart(2, '0');
+    return `${minutes}:${seconds}`;
+}
+
+function startThinkingTimer() {
+    stopThinkingTimer(false);
+    thinkingStartedAt = performance.now();
+    const timer = document.getElementById('thinkingTimer');
+    timer.hidden = false;
+    timer.classList.add('active');
+    timer.textContent = '00:00';
+    renderMatches([]);
+    thinkingTimerId = setInterval(() => {
+        timer.textContent = formatDuration(performance.now() - thinkingStartedAt);
+    }, 1000);
+}
+
+function stopThinkingTimer(keepVisible = true) {
+    if (thinkingTimerId) {
+        clearInterval(thinkingTimerId);
+        thinkingTimerId = null;
+    }
+    const timer = document.getElementById('thinkingTimer');
+    if (!timer) return 0;
+    const elapsed = thinkingStartedAt ? performance.now() - thinkingStartedAt : 0;
+    timer.textContent = formatDuration(elapsed);
+    timer.classList.remove('active');
+    timer.hidden = !keepVisible;
+    thinkingStartedAt = null;
+    return elapsed;
 }
 
 function copyToClipboard(text, btn) {
@@ -261,14 +302,15 @@ function renderEvidenceSummary(intentPlan, bundles, validation, response) {
         const label = item.table && item.column ? `${item.table}.${item.column}` : item.column;
         if (label && !fields.includes(label)) fields.push(label);
     }));
-    if (!intents && !tableNames.length && !fields.length) return '';
     const parts = [
         intents ? `Intent: ${intents}` : '',
         tableNames.length ? `Tables: ${tableNames.join(', ')}` : '',
         fields.length ? `Fields: ${fields.join(', ')}` : '',
         response.agent_run_id ? `Run: ${response.agent_run_id}` : '',
-        response.llm_call_count ? `LLM: ${response.llm_call_count}` : ''
+        response.llm_call_count ? `LLM: ${response.llm_call_count}` : '',
+        response.client_elapsed_ms ? `思考時間: ${formatDuration(response.client_elapsed_ms)}` : ''
     ].filter(Boolean);
+    if (!parts.length) return '';
     const validText = validation && validation.valid === false ? 'INVALID' : 'VERIFIED';
     return `<p class="side-muted">${escapeHtml(validText + ' / ' + parts.join(' / '))}</p>`;
 }
@@ -313,10 +355,20 @@ async function sendMessage(text) {
     lastRequirement = text;
     const product = document.getElementById('productSelect').value;
     addMessage('user', escapeHtml(text));
-    addMessage('assistant', `<i class="fas fa-spinner fa-spin"></i> ${escapeHtml(t('checking'))}`);
-
-    const log = document.getElementById('chatLog');
-    const pending = log.lastElementChild;
+    startThinkingTimer();
+    const pending = addMessage('assistant', `
+        <div class="pending-row">
+            <i class="fas fa-spinner fa-spin"></i>
+            <span>${escapeHtml(t('checking'))}</span>
+            <span class="pending-elapsed">00:00</span>
+        </div>
+    `);
+    const pendingTimer = pending.querySelector('.pending-elapsed');
+    const pendingInterval = setInterval(() => {
+        if (thinkingStartedAt && pendingTimer) {
+            pendingTimer.textContent = formatDuration(performance.now() - thinkingStartedAt);
+        }
+    }, 1000);
 
     const payload = {
         product,
@@ -329,18 +381,28 @@ async function sendMessage(text) {
         use_aliases: document.getElementById('useAliases').checked
     };
 
-    const res = await fetch('/api/assistant/sql', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-    });
-    const data = await res.json();
-    pending.remove();
-    if (!res.ok) {
-        addMessage('assistant', `<span style="color:#dc2626;">${escapeHtml(data.detail || 'エラーが発生しました。')}</span>`);
-        return;
+    try {
+        const res = await fetch('/api/assistant/sql', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        const elapsed = stopThinkingTimer(true);
+        clearInterval(pendingInterval);
+        pending.remove();
+        if (!res.ok) {
+            addMessage('assistant', `<span style="color:#dc2626;">${escapeHtml(data.detail || 'エラーが発生しました。')}</span>`);
+            return;
+        }
+        data.client_elapsed_ms = elapsed;
+        renderRecord(data);
+    } catch (error) {
+        const elapsed = stopThinkingTimer(true);
+        clearInterval(pendingInterval);
+        pending.remove();
+        addMessage('assistant', `<span style="color:#dc2626;">${escapeHtml(error.message || 'エラーが発生しました。')} / ${formatDuration(elapsed)}</span>`);
     }
-    renderRecord(data);
 }
 
 document.getElementById('assistantForm').addEventListener('submit', async (event) => {
