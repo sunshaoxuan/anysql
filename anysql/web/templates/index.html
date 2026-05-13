@@ -250,11 +250,16 @@ function renderRecord(response) {
     const analysis = record.analysis || {};
     const stmt = record.statement || {};
     const snapshot = record.metadata_snapshot || {};
-    const warnings = snapshot.validation_warnings || [];
     const intentPlan = response.intent_plan || snapshot.intent_plan || {};
     const bundles = response.evidence_bundles || snapshot.evidence_bundles || [];
     const validation = response.validation_result || snapshot.validation_result || {};
-    const invalidReason = response.invalid_reason || '';
+    const warnings = [...new Set([
+        ...(snapshot.validation_warnings || []),
+        ...((validation && validation.warnings) || []),
+        ...((validation && validation.errors) || [])
+    ].filter(Boolean))];
+    const invalidReason = response.invalid_reason || (validation && validation.valid === false ? ((validation.errors || []).join(' / ') || 'Invalid draft') : '');
+    const canAccept = !(response.learned || response.mode === 'matched' || warnings.length || invalidReason || (validation && validation.valid === false));
     currentSqlId = stmt.id;
     currentSql = decodeHtmlEntities(stmt.raw_sql || '');
 
@@ -287,7 +292,7 @@ function renderRecord(response) {
         ${renderEvidenceSummary(intentPlan, bundles, validation, response)}
         ${invalidReason ? `<p class="side-muted">${escapeHtml(invalidReason)}</p>` : ''}
         ${warnings.length ? `<p class="side-muted">${escapeHtml(warnings.join(' / '))}</p>` : ''}
-        ${response.learned || response.mode === 'matched' || warnings.length || invalidReason ? '' : `<button class="btn btn-primary icon-btn" onclick="acceptCurrentSql(this)" title="${escapeHtml(t('accept'))}"><i class="fas fa-thumbs-up"></i></button>`}
+        ${canAccept ? `<button class="btn btn-primary icon-btn" onclick="acceptCurrentSql(this)" title="${escapeHtml(t('accept'))}"><i class="fas fa-thumbs-up"></i></button>` : ''}
     `);
 }
 

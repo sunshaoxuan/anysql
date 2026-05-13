@@ -96,3 +96,38 @@ def test_transfer_check_log_restricts_to_check_log_table():
     bundle = build_evidence_bundles(plan, evidence)[0]
     assert bundle.recommended_tables[0]["table"] == "XCIDOCHKLOG"
     assert all(item["table"] == "XCIDOCHKLOG" for item in bundle.recommended_tables)
+
+
+def test_part_time_hire_date_restricts_to_djnd3001():
+    plan = build_intent_plan('查所有姓“村田”的非常勤職員的入职日')
+    assert plan.units[0].name == "part_time_employee_hire_date"
+    evidence = [
+        {
+            "facet": "table_profile",
+            "source_id": "DKIDO",
+            "table": "DKIDO",
+            "score": 0.98,
+            "reasons": ["vector"],
+            "meta": {"table": "DKIDO", "domain": "transfer", "role": "business_fact"},
+        },
+        {
+            "facet": "table_profile",
+            "source_id": "DJND3001",
+            "table": "DJND3001",
+            "score": 0.62,
+            "reasons": ["profile"],
+            "meta": {"table": "DJND3001", "domain": "employee", "role": "master"},
+        },
+        {
+            "facet": "column_semantic",
+            "source_id": "DJND3001.NINYO_DTE",
+            "table": "DJND3001",
+            "column": "NINYO_DTE",
+            "score": 0.7,
+            "meta": {"table": "DJND3001", "column": "NINYO_DTE", "domain": "employee", "role": "master"},
+        },
+    ]
+    bundle = build_evidence_bundles(plan, evidence)[0]
+    assert bundle.recommended_tables[0]["table"] == "DJND3001"
+    assert all(row["table"] != "DKIDO" for row in bundle.recommended_tables)
+    assert bundle.recommended_fields[0]["column"] == "NINYO_DTE"

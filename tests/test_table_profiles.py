@@ -79,6 +79,16 @@ def test_employee_basic_policy_blocks_dangerous_roles():
     assert "backup" in policy.blocked_roles
 
 
+def test_part_time_employee_hire_date_policy_prefers_djnd3001():
+    policy = policy_for_intent(resolve_intent('查所有姓“村田”的非常勤職員的入职日'))
+    assert policy is not None
+    assert policy.intent == "part_time_employee_hire_date"
+    assert policy.domain == "employee"
+    assert policy.preferred_tables == ("DJND3001",)
+    assert "business_fact" in policy.blocked_roles
+    assert "history_fact" in policy.blocked_roles
+
+
 def test_transfer_records_policy_blocks_check_log():
     policy = policy_for_intent(resolve_intent("查所有异动记录"))
     assert policy is not None

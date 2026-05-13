@@ -250,12 +250,15 @@ class PGVectorRepository:
                    STRING_AGG(
                        DISTINCT CASE
                            WHEN mc.column_name ~* '(C?NAME|KANJI|KANA|MEI|SHIMEI|SIMEI|SHAIN|EMPLOYEE|CEMPLOYEE|HTRE|IDO|NNMN)'
+                                OR mc.column_name ~* '(NINYO|SAIYO|HIRE)'
                                 OR COALESCE(mc.comment, '') LIKE '%氏名%'
                                 OR COALESCE(mc.comment, '') LIKE '%職員番号%'
                                 OR COALESCE(mc.comment, '') LIKE '%社員番号%'
                                 OR COALESCE(mc.comment, '') LIKE '%異動%'
                                 OR COALESCE(mc.comment, '') LIKE '%任免%'
                                 OR COALESCE(mc.comment, '') LIKE '%発令%'
+                                OR COALESCE(mc.comment, '') LIKE '%任用%'
+                                OR COALESCE(mc.comment, '') LIKE '%採用%'
                            THEN mc.column_name || ':' || COALESCE(mc.comment, '')
                            ELSE NULL
                        END,
@@ -359,6 +362,11 @@ def _tokenize_query(query: str) -> list[str]:
         "姓": ["氏名", "漢字氏名", "CNAMEKNJ"],
         "基本信息": ["基本情報", "給与基本情報", "BTKIHON"],
         "基本資料": ["基本情報", "給与基本情報", "BTKIHON"],
+        "非常勤": ["非常勤職員", "非職", "DJND3001"],
+        "入职": ["入社", "任用", "任用年月日", "NINYO_DTE", "DNINYO_DTE"],
+        "入社": ["任用", "任用年月日", "NINYO_DTE", "DNINYO_DTE"],
+        "任用": ["任用年月日", "NINYO_DTE", "DNINYO_DTE"],
+        "採用": ["採用年月日", "SAIYO", "NINYO_DTE"],
         "异动": ["異動", "任免", "発令"],
         "異動": ["異動", "任免", "発令"],
     }

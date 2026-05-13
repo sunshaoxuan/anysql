@@ -529,6 +529,8 @@ def _domain_hint(requirement: str) -> str:
     )
     if asks_basic_employee:
         return "本次看起来是员工/职员基本信息查询。请让 LLM 在候选表中综合判断最贴近“基本情報/給与基本情報/氏名/職員番号”的表和字段，禁止硬编码固定表。"
+    if resolve_intent(text) == "part_time_employee_hire_date":
+        return "本次是非常勤職員的入职/任用日期查询。优先使用 DJND3001，日期字段优先 NINYO_DTE/DNINYO_DTE，姓名字段优先 CNAMEKNJ/CNAMEKNA，禁止 DKIDO/DHJKIDO/log/work/IF。"
     if resolve_intent(text) == "transfer_records":
         return "本次是异动记录查询。普通异动记录优先使用 DKIDO_R / DKIDO；只有用户明确要求非常勤/非职时才使用 DHJKIDO_R / DHJKIDO。"
     if resolve_intent(text) == "transfer_check_log":
@@ -544,4 +546,6 @@ def _profile_rule(requirement: str) -> str:
         return "本意图允许 log 表；优先使用 XCIDOCHKLOG。"
     if intent == "employee_basic_name":
         return "基本信息查询只允许 master 表。不得使用給与/ワーク/IF/log/backup 表。"
+    if intent == "part_time_employee_hire_date":
+        return "非常勤職員入职/任用日期查询只允许 employee/master 表，优先 DJND3001；不得使用異動、log、work、IF、backup 表。"
     return "未知意图下避免使用 log/work/if_staging/backup 表，除非用户明确要求日志、检查、接口或临时数据。"

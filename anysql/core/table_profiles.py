@@ -36,6 +36,13 @@ POLICIES: dict[str, IntentPolicy] = {
         blocked_roles=("log", "work", "if_staging", "backup"),
         preferred_tables=("DJND0110", "MAST_EMPLOYEES", "MAST_EMPLOYEES2"),
     ),
+    "part_time_employee_hire_date": IntentPolicy(
+        intent="part_time_employee_hire_date",
+        domain="employee",
+        allowed_roles=("master",),
+        blocked_roles=("log", "work", "if_staging", "backup", "business_fact", "history_fact"),
+        preferred_tables=("DJND3001",),
+    ),
     "transfer_records": IntentPolicy(
         intent="transfer_records",
         domain="transfer",
@@ -60,6 +67,10 @@ def resolve_intent(requirement: str) -> str:
     basic = any(word in text for word in ("基本情况", "基本信息", "基本資料", "基本情報"))
     employee = any(word in text for word in ("员工", "职员", "職員", "社員", "人的", "人の"))
     name = any(word in text for word in ("姓", "姓名", "名字", "氏名"))
+    part_time = any(word in text for word in ("非常勤", "非職", "非职", "パート"))
+    hire_date = any(word in text for word in ("入职", "入社", "入职日", "入社日", "入职日期", "入社年月日", "任用", "任用年月日", "採用", "採用年月日"))
+    if part_time and hire_date:
+        return "part_time_employee_hire_date"
     if transfer and check_log:
         return "transfer_check_log"
     if transfer:

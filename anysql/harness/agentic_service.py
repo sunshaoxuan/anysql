@@ -14,7 +14,7 @@ from anysql.core.query_expansion import expand_query_for_metadata
 from anysql.core.sql_cleaner import clean_generated_sql, strip_sql_comments
 from anysql.core.sql_parser import _extract_tables
 from anysql.core.table_profiles import policy_for_intent, resolve_intent
-from anysql.models.schemas import GeneratedSQL, SQLCandidateMatch, SQLRecord
+from anysql.models.schemas import Complexity, GeneratedSQL, SQLAnalysis, SQLCandidateMatch, SQLRecord
 from anysql.storage.models import MetadataColumn, MetadataTable
 from anysql.storage.pgvector_engine import PGVectorRepository
 from anysql.storage.rag_repository import AgentRunRepository, RagRepository
@@ -135,6 +135,9 @@ class HarnessAgentService:
                     repair_count += 1
                     llm_call_count += 1
                     validation = self.validate_record(record, intent_plan, evidence_bundles)
+                    if not validation.valid and self._deterministic_repair(record, intent_plan, evidence_bundles):
+                        repair_count += 1
+                        validation = self.validate_record(record, intent_plan, evidence_bundles)
             invalid_reason = "; ".join(validation.errors[:3]) if not validation.valid else ""
             record.metadata_snapshot = {
                 **(record.metadata_snapshot or {}),
@@ -262,12 +265,50 @@ class HarnessAgentService:
         text = intent_plan.original
         if any(word in text for word in ("姓", "姓名", "氏名", "名字")) and not re.search(r"(CNAME|NAME|氏名).+LIKE|LIKE.+(CNAME|NAME|氏名)", sql, flags=re.IGNORECASE):
             errors.append("Name filter from requirement is missing.")
-        if any(word in text for word in ("所有", "全部", "全件", "すべて", "all")) and re.search(r"\bWHERE\b", sql, flags=re.IGNORECASE):
+        if resolve_intent(text) == "part_time_employee_hire_date":
+            if "DJND3001" not in used_tables:
+                errors.append("Part-time employee hire-date queries must use DJND3001.")
+            if not re.search(r"\b(D?NINYO_DTE|SAIYO|HIRE)\b", sql, flags=re.IGNORECASE):
+                errors.append("Hire/appointment date field is missing.")
+        has_specific_filter = any(condition.get("kind") != "all_records" for condition in intent_plan.conditions)
+        if (
+            any(word in text for word in ("所有", "全部", "全件", "すべて", "all"))
+            and not has_specific_filter
+            and re.search(r"\bWHERE\b", sql, flags=re.IGNORECASE)
+        ):
             warnings.append("Requirement asks for all records but SQL contains WHERE; verify predicate is requested.")
         return ValidationResult(valid=not errors, warnings=warnings, errors=errors)
 
     def _deterministic_repair(self, record: SQLRecord, intent_plan: IntentPlan, evidence_bundles: list[EvidenceBundle]) -> bool:
         text = intent_plan.original or ""
+        if resolve_intent(text) == "part_time_employee_hire_date" and "DJND3001" not in {table.upper() for table in record.statement.tables}:
+            surname = ""
+            for condition in intent_plan.conditions:
+                if condition.get("kind") == "name":
+                    surname = str(condition.get("value") or "").strip()
+                    break
+            where = f"\nWHERE CNAMEKNJ LIKE '{surname}%'" if surname else ""
+            record.statement.raw_sql = (
+                "-- AnySQL: 非常勤職員の任用年月日を取得します。\n"
+                "-- 条件: 氏名の先頭一致で対象者を絞り込みます。\n"
+                "SELECT CSHAINNO,\n"
+                "       CNAMEKNJ,\n"
+                "       NINYO_DTE,\n"
+                "       DNINYO_DTE\n"
+                "FROM DJND3001"
+                f"{where};"
+            )
+            record.statement.tables = ["DJND3001"]
+            record.analysis = SQLAnalysis(
+                summary="非常勤職員の姓で任用年月日を検索",
+                business_context=["非常勤職員基本情報DBから任用日を確認する"],
+                tables_involved={"DJND3001": "非常勤職員基本情報DB"},
+                usage_guide="氏名の先頭一致条件を変更して対象者を絞り込みます。",
+                category=["employee", "part_time", "hire_date"],
+                complexity=Complexity.SIMPLE,
+                keywords=["DJND3001", "CNAMEKNJ", "NINYO_DTE", "DNINYO_DTE"],
+            )
+            return True
         if resolve_intent(text) == "transfer_records" and any(word in text.lower() for word in ("所有", "全部", "全件", "すべて", "all")):
             table = "DKIDO_R"
             if any(word in text for word in ("当前", "現在", "未累積")):
@@ -414,6 +455,31 @@ def build_evidence_bundles(intent_plan: IntentPlan, evidence: list[dict]) -> lis
                 table = str(item.get("table") or (item.get("meta") or {}).get("table") or "").upper()
                 if table == "XCIDOCHKLOG":
                     item["score"] = float(item.get("score") or 0) + 25
+        if unit.name == "part_time_employee_hire_date":
+            preferred_items = [
+                item for item in filtered
+                if str(item.get("table") or (item.get("meta") or {}).get("table") or "").upper() == "DJND3001"
+            ]
+            if preferred_items:
+                filtered = preferred_items
+            for column, score in (("NINYO_DTE", 22.0), ("DNINYO_DTE", 21.5), ("CNAMEKNJ", 21.0), ("CSHAINNO", 20.5)):
+                filtered.append({
+                    "source_id": f"policy:DJND3001.{column}",
+                    "facet": "column_semantic",
+                    "table": "DJND3001",
+                    "column": column,
+                    "score": score,
+                    "reasons": ["intent_policy"],
+                    "evidence": f"DJND3001.{column} is required evidence for part-time employee hire-date queries.",
+                    "meta": {"table": "DJND3001", "column": column, "domain": "employee", "role": "master"},
+                })
+            for item in filtered:
+                table = str(item.get("table") or (item.get("meta") or {}).get("table") or "").upper()
+                column = str(item.get("column") or (item.get("meta") or {}).get("column") or "").upper()
+                if table == "DJND3001":
+                    item["score"] = float(item.get("score") or 0) + 30
+                if column in {"NINYO_DTE", "DNINYO_DTE", "CNAMEKNJ", "CNAMEKNA", "CSHAINNO"}:
+                    item["score"] = float(item.get("score") or 0) + 10
         tables = _top_tables(filtered, limit=4)
         fields = _top_fields(filtered, tables, limit=40)
         bundle = EvidenceBundle(
@@ -566,6 +632,8 @@ def _output_fields(text: str) -> list[str]:
     fields = []
     if any(word in text for word in ("基本信息", "基本情報", "基本資料")):
         fields.extend(["employee_no", "name", "birth", "gender", "organization"])
+    if any(word in text for word in ("入职", "入社", "任用", "採用")):
+        fields.extend(["employee_no", "name", "hire_date"])
     if _mentions_transfer(text):
         fields.extend(["employee_no", "issue_date", "transfer_code", "transfer_name", "name"])
     return list(dict.fromkeys(fields))
