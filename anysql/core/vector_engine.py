@@ -2,7 +2,7 @@
 AnySQL 向量引擎
 
 基于 ChromaDB 的向量存储与语义检索。
-使用 Ollama bge-m3 生成 Embedding。
+使用 Ollama embedding 模型生成向量。
 """
 
 from __future__ import annotations

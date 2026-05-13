@@ -25,7 +25,7 @@ class LLMConfig(BaseModel):
     """LLM 服务配置"""
     base_url: str = "http://ccnode.briconbric.com:22545"
     chat_model: str = "qwen3:14b"
-    embed_model: str = "bge-m3"
+    embed_model: str = "qwen3-embedding:8b"
     timeout: int = 120
     max_retries: int = 3
     temperature: float = 0.3
@@ -158,6 +158,10 @@ def load_config(config_path: Optional[str] = None) -> AppConfig:
         _config.queue.redis_url = os.environ["ANYSQL_REDIS_URL"]
     if os.environ.get("ANYSQL_LLM_BASE_URL"):
         _config.llm.base_url = os.environ["ANYSQL_LLM_BASE_URL"]
+    if os.environ.get("ANYSQL_CHAT_MODEL"):
+        _config.llm.chat_model = os.environ["ANYSQL_CHAT_MODEL"]
+    if os.environ.get("ANYSQL_EMBED_MODEL"):
+        _config.llm.embed_model = os.environ["ANYSQL_EMBED_MODEL"]
     if os.environ.get("ANYSQL_SERVER_PORT"):
         _config.server.port = int(os.environ["ANYSQL_SERVER_PORT"])
     setup_file_logging(

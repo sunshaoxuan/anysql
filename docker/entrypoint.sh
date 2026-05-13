@@ -26,25 +26,6 @@ done
 
 if [ "${ANYSQL_RUN_MIGRATIONS:-true}" = "true" ]; then
 alembic upgrade head
-python - <<'PY'
-from sqlalchemy import create_engine, text
-from anysql.config import load_config
-
-config = load_config()
-engine = create_engine(config.storage.database_url)
-with engine.begin() as conn:
-    conn.execute(text("""
-        CREATE TABLE IF NOT EXISTS alembic_version (
-            version_num VARCHAR(32) NOT NULL,
-            CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num)
-        )
-    """))
-    conn.execute(text("""
-        INSERT INTO alembic_version (version_num)
-        VALUES ('20260512_0001')
-        ON CONFLICT (version_num) DO NOTHING
-    """))
-PY
 fi
 
 case "${1:-api}" in

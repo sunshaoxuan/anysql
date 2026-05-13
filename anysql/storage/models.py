@@ -22,7 +22,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
-EMBEDDING_DIMENSION = 1024
+EMBEDDING_DIMENSION = 4096
 
 
 class Base(DeclarativeBase):

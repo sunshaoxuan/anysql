@@ -92,33 +92,24 @@ class RagRepository:
                     {"table": table.table_name, "domain": profile.domain, "role": profile.role, "source": profile.source},
                     weight=1.4 if profile.source == "manual" else 1.15,
                 )
-            for column in columns:
+            for chunk_index, chunk in enumerate(_column_chunks(columns, 40)):
                 count += self._upsert_node(
                     product_id,
                     "column_semantic",
-                    f"{table.table_name}.{column.column_name}",
+                    f"{table.table_name}.columns.{chunk_index}",
                     "column_semantic",
-                    _column_content(table, column, profile),
+                    _column_chunk_content(table, chunk, profile),
                     {
                         "table": table.table_name,
-                        "column": column.column_name,
-                        "comment": column.comment,
-                        "data_type": column.data_type,
+                        "columns": [column.column_name for column in chunk],
+                        "chunk_index": chunk_index,
                         "domain": getattr(profile, "domain", "unknown"),
                         "role": getattr(profile, "role", "unknown"),
                     },
                     weight=1.25,
                 )
+            for column in columns:
                 stat_content, stat_meta = _column_stat_content(table, column)
-                count += self._upsert_node(
-                    product_id,
-                    "column_stat",
-                    f"{table.table_name}.{column.column_name}",
-                    "column_stat",
-                    stat_content,
-                    stat_meta,
-                    weight=0.85,
-                )
                 predicate = _predicate_pattern(table, column)
                 if predicate:
                     count += self._upsert_node(
@@ -201,7 +192,7 @@ class RagRepository:
         self.session.flush()
         return count
 
-    async def index_nodes(self, product_id: str, llm, embedding_model: str, facets: set[str] | None = None) -> int:
+    async def index_nodes(self, product_id: str, llm, embedding_model: str, facets: set[str] | None = None, commit_each_batch: bool = False) -> int:
         query = select(RagNode).where(RagNode.product_id == product_id)
         if facets:
             query = query.where(RagNode.facet.in_(facets))
@@ -239,6 +230,8 @@ class RagRepository:
                 row.embedding = embedding
                 indexed += 1
             self.session.flush()
+            if commit_each_batch:
+                self.session.commit()
         return indexed
 
     async def hybrid_search(self, product_id: str, query: str, llm, embedding_model: str, top_k: int = 24) -> list[dict]:
@@ -436,6 +429,28 @@ def _column_content(table: MetadataTable, column: MetadataColumn, profile: Metad
         f"Table comment: {table.comment}\n"
         f"Table role: {role}"
     )
+
+
+def _column_chunks(columns: list[MetadataColumn], chunk_size: int) -> list[list[MetadataColumn]]:
+    return [columns[offset:offset + chunk_size] for offset in range(0, len(columns), chunk_size)]
+
+
+def _column_chunk_content(table: MetadataTable, columns: list[MetadataColumn], profile: MetadataTableProfile | None) -> str:
+    role = f"{profile.domain}/{profile.role}" if profile else "unknown/unknown"
+    lines = [
+        f"Table: {table.table_name}",
+        f"Table comment: {table.comment}",
+        f"Table role: {role}",
+        "Columns:",
+    ]
+    for column in columns:
+        stat_content, stat_meta = _column_stat_content(table, column)
+        traits = ",".join(stat_meta.get("traits", []))
+        lines.append(
+            f"- {column.column_name}: {column.comment}; type={column.data_type}({column.data_length or ''}); "
+            f"nullable={column.nullable}; traits={traits}"
+        )
+    return "\n".join(lines)
 
 
 def _column_stat_content(table: MetadataTable, column: MetadataColumn) -> tuple[str, dict]:

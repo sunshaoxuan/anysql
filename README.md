@@ -52,7 +52,7 @@ Use `config.example.yaml` as the template for local setup.
 - Python 3.11 or newer.
 - An Ollama-compatible API endpoint exposing:
   - chat model, for example `qwen3:14b`
-  - embedding model, for example `bge-m3`
+  - embedding model, for example `qwen3-embedding:8b`
 - Optional Oracle client dependency if database metadata must be collected live:
   - `pip install ".[oracle]"`
 - Production storage and worker dependencies:

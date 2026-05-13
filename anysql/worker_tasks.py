@@ -67,10 +67,11 @@ async def _metadata_delta_sync(job_id: str, product_code: str) -> dict:
             metadata = MetadataRepository(session)
             total, changed = metadata.upsert_tables(product.id, table_data)
             profiled = await TableProfileRepository(session).rebuild_auto_with_llm(product.id, llm)
-            indexed = await PGVectorRepository(session, llm, config.llm.embed_model).index_metadata(product.id)
+            indexed = await PGVectorRepository(session, llm, config.llm.embed_model).index_metadata(product.id, commit_each_batch=True)
             rag = RagRepository(session)
             rag_nodes = rag.rebuild_metadata_nodes(product.id)
-            rag_indexed = await rag.index_nodes(product.id, llm, config.llm.embed_model)
+            session.commit()
+            rag_indexed = await rag.index_nodes(product.id, llm, config.llm.embed_model, commit_each_batch=True)
             result = {
                 "table_count": total or (index or {}).get("table_count", 0),
                 "changed": changed,
@@ -128,7 +129,7 @@ async def _sql_analysis(job_id: str, product_code: str, force: bool = False) -> 
         with db.session() as session:
             product = ProductRepository(session).get_by_code(product_code)
             ok_records = [r for r in records if r.status == AnalysisStatus.SUCCESS]
-            indexed = await PGVectorRepository(session, llm, config.llm.embed_model).index_records(ok_records, product.id)
+            indexed = await PGVectorRepository(session, llm, config.llm.embed_model).index_records(ok_records, product.id, commit_each_batch=True)
             result = {"completed": completed, "failed": failed, "indexed_count": indexed}
             JobRepository(session).mark_succeeded(job_id, result)
             return result
@@ -154,10 +155,11 @@ async def _embedding_rebuild(job_id: str, product_code: str) -> dict:
             if not product:
                 raise ValueError(f"Product not found: {product_code}")
             records = SQLKnowledgeRepository(session).list_records(product.id)
-            sql_indexed = await PGVectorRepository(session, llm, config.llm.embed_model).index_records(records, product.id)
-            metadata_indexed = await PGVectorRepository(session, llm, config.llm.embed_model).index_metadata(product.id)
+            sql_indexed = await PGVectorRepository(session, llm, config.llm.embed_model).index_records(records, product.id, commit_each_batch=True)
+            metadata_indexed = await PGVectorRepository(session, llm, config.llm.embed_model).index_metadata(product.id, commit_each_batch=True)
             rag = RagRepository(session)
             rag_nodes = rag.rebuild_metadata_nodes(product.id)
+            session.commit()
             accepted_rows = list(session.scalars(select(SQLRecordRow).where(
                 SQLRecordRow.product_id == product.id,
                 SQLRecordRow.learned.is_(True),
@@ -165,7 +167,7 @@ async def _embedding_rebuild(job_id: str, product_code: str) -> dict:
             for row in accepted_rows:
                 record = SQLKnowledgeRepository.to_schema(row)
                 rag.upsert_accepted_sql_nodes(product.id, record, row.comment or (record.analysis.summary if record.analysis else ""))
-            rag_indexed = await rag.index_nodes(product.id, llm, config.llm.embed_model)
+            rag_indexed = await rag.index_nodes(product.id, llm, config.llm.embed_model, commit_each_batch=True)
             result = {"sql_indexed": sql_indexed, "metadata_indexed": metadata_indexed, "rag_node_count": rag_nodes, "rag_indexed_count": rag_indexed}
             jobs.mark_succeeded(job_id, result)
             return result

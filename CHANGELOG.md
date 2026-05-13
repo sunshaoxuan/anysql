@@ -17,6 +17,8 @@ All notable changes to AnySQL are documented in this file.
 
 ### Changed
 
+- Switched the default embedding model from `bge-m3` to `qwen3-embedding:8b` and migrated pgvector columns to 4096 dimensions.
+- Changed Metadata RAG field nodes from per-column vectors to per-table column chunks so full rebuilds fit the ccnode embedding capacity.
 - Database-mode assistant requests now use an evidence-first Harness Agent path before falling back to the legacy flow.
 - Metadata sync and embedding rebuild jobs now prepare multi-dimensional RAG nodes in addition to legacy pgvector embeddings.
 - Metadata sync and manual profile rebuild now use deterministic profiling plus a bounded qwen3 review pass for high-priority conflicting table evidence.

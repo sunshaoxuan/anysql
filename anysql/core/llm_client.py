@@ -23,7 +23,7 @@ class LLMClient:
         self,
         base_url: str = "http://ccnode.briconbric.com:22545",
         chat_model: str = "qwen3:14b",
-        embed_model: str = "bge-m3",
+        embed_model: str = "qwen3-embedding:8b",
         timeout: int = 120,
         max_retries: int = 3,
         temperature: float = 0.3,

@@ -29,9 +29,12 @@ services:
         condition: service_started
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-anysql}
+      ANYSQL_CONFIG: /app/config/config.yaml
       ANYSQL_DATABASE_URL: postgresql+psycopg://anysql:${POSTGRES_PASSWORD:-anysql}@postgres:5432/anysql
       ANYSQL_REDIS_URL: redis://redis:6379/0
       ANYSQL_LLM_BASE_URL: ${ANYSQL_LLM_BASE_URL:-http://ccnode.briconbric.com:22545}
+      ANYSQL_CHAT_MODEL: ${ANYSQL_CHAT_MODEL:-qwen3:14b}
+      ANYSQL_EMBED_MODEL: ${ANYSQL_EMBED_MODEL:-qwen3-embedding:8b}
       ANYSQL_SERVER_PORT: 8765
       ANYSQL_RUN_MIGRATIONS: "true"
     ports:
@@ -54,9 +57,12 @@ services:
         condition: service_started
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-anysql}
+      ANYSQL_CONFIG: /app/config/config.yaml
       ANYSQL_DATABASE_URL: postgresql+psycopg://anysql:${POSTGRES_PASSWORD:-anysql}@postgres:5432/anysql
       ANYSQL_REDIS_URL: redis://redis:6379/0
       ANYSQL_LLM_BASE_URL: ${ANYSQL_LLM_BASE_URL:-http://ccnode.briconbric.com:22545}
+      ANYSQL_CHAT_MODEL: ${ANYSQL_CHAT_MODEL:-qwen3:14b}
+      ANYSQL_EMBED_MODEL: ${ANYSQL_EMBED_MODEL:-qwen3-embedding:8b}
       ANYSQL_RUN_MIGRATIONS: "false"
     volumes:
       - ./deploy-data/config:/app/config
@@ -76,9 +82,12 @@ services:
         condition: service_started
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-anysql}
+      ANYSQL_CONFIG: /app/config/config.yaml
       ANYSQL_DATABASE_URL: postgresql+psycopg://anysql:${POSTGRES_PASSWORD:-anysql}@postgres:5432/anysql
       ANYSQL_REDIS_URL: redis://redis:6379/0
       ANYSQL_LLM_BASE_URL: ${ANYSQL_LLM_BASE_URL:-http://ccnode.briconbric.com:22545}
+      ANYSQL_CHAT_MODEL: ${ANYSQL_CHAT_MODEL:-qwen3:14b}
+      ANYSQL_EMBED_MODEL: ${ANYSQL_EMBED_MODEL:-qwen3-embedding:8b}
       ANYSQL_RUN_MIGRATIONS: "false"
     volumes:
       - ./deploy-data/config:/app/config

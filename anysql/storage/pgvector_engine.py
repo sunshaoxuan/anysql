@@ -30,7 +30,7 @@ class PGVectorRepository:
     def _metadata_doc(table: MetadataTable) -> str:
         return VectorEngine._metadata_doc(table.table_name, table.raw or {})
 
-    async def index_records(self, records: list[SQLRecord], product_id: str) -> int:
+    async def index_records(self, records: list[SQLRecord], product_id: str, commit_each_batch: bool = False) -> int:
         if not records:
             return 0
         count = 0
@@ -66,15 +66,19 @@ class PGVectorRepository:
                 row.embedding = emb
                 count += 1
             self.session.flush()
+            if commit_each_batch:
+                self.session.commit()
         return count
 
-    async def index_metadata(self, product_id: str) -> int:
+    async def index_metadata(self, product_id: str, commit_each_batch: bool = False) -> int:
         tables = list(self.session.scalars(select(MetadataTable).where(MetadataTable.product_id == product_id)))
         source_ids = {t.table_name for t in tables}
         existing = list(self.session.scalars(select(MetadataEmbedding).where(MetadataEmbedding.product_id == product_id)))
         stale = [row.id for row in existing if row.source_id not in source_ids]
         if stale:
             self.session.execute(delete(MetadataEmbedding).where(MetadataEmbedding.id.in_(stale)))
+            if commit_each_batch:
+                self.session.commit()
 
         docs: list[tuple[MetadataTable, str, str]] = []
         for table in tables:
@@ -118,6 +122,8 @@ class PGVectorRepository:
                 row.embedding = emb
                 count += 1
             self.session.flush()
+            if commit_each_batch:
+                self.session.commit()
         return count
 
     async def search(self, query: str, product_code: str | None = None, top_k: int = 10) -> list[SearchResult]:

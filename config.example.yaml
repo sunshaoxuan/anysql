@@ -6,7 +6,7 @@
 llm:
   base_url: "http://ccnode.briconbric.com:22545"
   chat_model: "qwen3:14b"
-  embed_model: "bge-m3"
+  embed_model: "qwen3-embedding:8b"
   timeout: 120
   max_retries: 3
   temperature: 0.3
